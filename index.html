@@ -751,9 +751,7 @@
     const WORLD_PICKUP_TRIGGER_EVERY = 4;
     const SFX_GAIN_MULT = 1.45;
     const BGM_VOLUME = 0.24;
-    const TAP_DROP_BOOST_MULT = 2.8;
-    const TAP_DROP_BOOST_MS = 320;
-    const TAP_DROP_MIN_ANGLE = 24;
+    const KEYBOARD_TILT_ANGLE = 30;
     const SFX_COOLDOWN_MS = {
       move: 85,
       land: 0,
@@ -903,10 +901,10 @@
         if (e.key === '2') { useItemAt(1); e.preventDefault(); return; }
         if (e.key === '3') { useItemAt(2); e.preventDefault(); return; }
         if (e.key === '4') { useItemAt(3); e.preventDefault(); return; }
-        if (e.key === 'ArrowLeft')  { tiltX = -30; e.preventDefault(); }
-        if (e.key === 'ArrowRight') { tiltX =  30; e.preventDefault(); }
-        if (e.key === 'ArrowUp')    { tiltY = -30; e.preventDefault(); }
-        if (e.key === 'ArrowDown')  { tiltY =  30; e.preventDefault(); }
+        if (e.key === 'ArrowLeft')  { keyState.left = true;  applyKeyboardTilt(); e.preventDefault(); }
+        if (e.key === 'ArrowRight') { keyState.right = true; applyKeyboardTilt(); e.preventDefault(); }
+        if (e.key === 'ArrowUp')    { keyState.up = true;    applyKeyboardTilt(); e.preventDefault(); }
+        if (e.key === 'ArrowDown')  { keyState.down = true;  applyKeyboardTilt(); e.preventDefault(); }
       });
       document.addEventListener('keyup', e => {
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') tiltX = 0;
@@ -933,9 +931,22 @@
       } else {
         initSensorPermissionState();
       }
+    }
 
-      renderIdle();
-      syncAudioState();
+    async function requestOrientationPermission() {
+      if (!window.DeviceOrientationEvent) return;
+      if (orientationListening) return;
+      if (typeof DeviceOrientationEvent.requestPermission !== 'function') {
+        setupOrientationAccess();
+        return;
+      }
+      const perm = await DeviceOrientationEvent.requestPermission().catch(() => 'denied');
+      if (perm === 'granted') {
+        window.addEventListener('deviceorientation', onOrient);
+        orientationListening = true;
+      } else {
+        showToast('陀螺仪未授权，可再次点击开始重试', '#ffd93d', 1200);
+      }
     }
 
     function bindStartOverlay() {
@@ -1108,6 +1119,7 @@
 
     function goHome() {
       playSfx('home');
+      resetKeyboardInput();
       const po = document.getElementById('pauseOverlay');
       po.classList.add('hidden');
       gameState = 'idle';
@@ -1318,6 +1330,7 @@
           return;
         case 'gameOver':
           playTone({ type: 'sine', frequency: 180, toFrequency: 60, duration: 0.9, gain: 0.1, attack: 0.004, hold: 0.02, release: 0.28 });
+          playTone({ type: 'triangle', frequency: 260, toFrequency: 120, duration: 0.55, gain: 0.06, attack: 0.003, hold: 0.016, release: 0.16 });
           playNoise({ duration: 0.6, gain: 0.04, attack: 0.004, hold: 0.02, release: 0.15, filterFrequency: 900, filterQ: 0.8, sweepTo: 180 });
           return;
         case 'start':
@@ -1477,12 +1490,6 @@
       setTimeout(() => el.classList.remove('show'), 260);
     }
 
-    function triggerTapDropBoost() {
-      if (gameState !== 'playing' || !piece) return;
-      if (pendingTarget) return;
-      tapDropBoostUntil = Math.max(tapDropBoostUntil, performance.now() + TAP_DROP_BOOST_MS);
-    }
-
     function bumpScore() {
       const el = document.getElementById('score');
       el.classList.remove('bump');
@@ -1534,6 +1541,8 @@
     // ============== 开始 ==============
     function startGame() {
       playSfx('start');
+      requestOrientationPermission();
+      resetKeyboardInput();
       const { maxW, maxH } = getCanvasBounds();
       COLS = selectedSize;
       ROWS = selectedSize;
@@ -1553,7 +1562,6 @@
       score = 0;
       tiltX = 0; tiltY = 0;
       moveAccX = 0; moveAccY = 0;
-      tapDropBoostUntil = 0;
       piecePlaced = 0;
       inventory = [];
       clears = 0;
@@ -1668,9 +1676,6 @@
       if (!piece) return;
 
       const speedMult = DIFF_CONFIG[selectedDiff].speedMult;
-      const boostActive = performance.now() < tapDropBoostUntil;
-      const effectiveTiltY = (boostActive && Math.abs(tiltY) < MIN_ANGLE) ? TAP_DROP_MIN_ANGLE : tiltY;
-
       if (piece.isLitBomb) {
         if (Math.abs(tiltX) >= MIN_ANGLE) {
           const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(tiltX)));
@@ -1690,15 +1695,14 @@
           moveAccX = 0;
         }
 
-        if (Math.abs(effectiveTiltY) >= MIN_ANGLE) {
-          const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(effectiveTiltY)));
-          const yMult = boostActive ? speedMult * TAP_DROP_BOOST_MULT : speedMult;
-          const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * yMult;
+        if (Math.abs(tiltY) >= MIN_ANGLE) {
+          const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(tiltY)));
+          const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * speedMult;
           const interval = 1000 / Math.max(0.001, speed);
           moveAccY += dt;
           while (moveAccY >= interval) {
             moveAccY -= interval;
-            const dy = effectiveTiltY < 0 ? -1 : 1;
+            const dy = tiltY < 0 ? -1 : 1;
             const ny = piece.y + dy;
             if (!outOfBounds(piece.x, ny, piece.shape) && !overlapsGrid(piece.x, ny, piece.shape)) {
               piece.y = ny;
@@ -1746,15 +1750,14 @@
       }
 
       // Y方向
-      if (Math.abs(effectiveTiltY) >= MIN_ANGLE) {
-        const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(effectiveTiltY)));
-        const yMult = boostActive ? speedMult * TAP_DROP_BOOST_MULT : speedMult;
-        const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * yMult;
+      if (Math.abs(tiltY) >= MIN_ANGLE) {
+        const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(tiltY)));
+        const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * speedMult;
         const interval = 1000 / Math.max(0.001, speed);
         moveAccY += dt;
         while (moveAccY >= interval) {
           moveAccY -= interval;
-          const dy = effectiveTiltY < 0 ? -1 : 1;
+          const dy = tiltY < 0 ? -1 : 1;
           const ny = piece.y + dy;
           if (!outOfBounds(piece.x, ny, piece.shape) && !overlapsGrid(piece.x, ny, piece.shape)) {
             piece.y = ny;
@@ -1769,7 +1772,7 @@
 
       // 锁定判定：
       // 当且仅当 倾斜方向的"下一格"是墙/方块 时，才锁定（固定当前方块）
-      if (shouldSettle(effectiveTiltY)) {
+      if (shouldSettle()) {
         settlePiece();
         if (gameState !== 'playing') return;
         const removed = checkLines();
@@ -1782,9 +1785,9 @@
     }
 
     // 判定是否需要固定：所有正在倾斜的方向的下一格都被阻挡
-    function shouldSettle(effectiveTiltY = tiltY) {
+    function shouldSettle() {
       const hasX = Math.abs(tiltX) >= MIN_ANGLE;
-      const hasY = Math.abs(effectiveTiltY) >= MIN_ANGLE;
+      const hasY = Math.abs(tiltY) >= MIN_ANGLE;
 
       // 不倾斜 → 不固定
       if (!hasX && !hasY) return false;
@@ -1798,7 +1801,7 @@
         xBlocked = outOfBounds(nx, piece.y, piece.shape) || overlapsGrid(nx, piece.y, piece.shape);
       }
       if (hasY) {
-        const dy = effectiveTiltY < 0 ? -1 : 1;
+        const dy = tiltY < 0 ? -1 : 1;
         const ny = piece.y + dy;
         yBlocked = outOfBounds(piece.x, ny, piece.shape) || overlapsGrid(piece.x, ny, piece.shape);
       }
