@@ -661,6 +661,8 @@
     let menuBgm = null;
     let gameBgm = null;
     let activeBgm = '';
+    let audioUnlocked = false;
+    let pendingBgmKind = '';
 
     // ============== 初始化 ==============
     function init() {
@@ -682,10 +684,24 @@
         toggleSound();
         toggleVibrate();
       });
+      document.getElementById('settingsBtn').addEventListener('touchend', e => {
+        e.preventDefault();
+        toggleSound();
+        toggleVibrate();
+      });
       document.getElementById('ruleBtn').addEventListener('click', toggleRulesPanel);
+      document.getElementById('ruleBtn').addEventListener('touchend', e => { e.preventDefault(); toggleRulesPanel(); });
       document.getElementById('scoreBtn').addEventListener('click', toggleScorePanel);
+      document.getElementById('scoreBtn').addEventListener('touchend', e => { e.preventDefault(); toggleScorePanel(); });
       document.getElementById('soundBtn').addEventListener('click', toggleSound);
+      document.getElementById('soundBtn').addEventListener('touchend', e => { e.preventDefault(); toggleSound(); });
       document.getElementById('vibrateBtn').addEventListener('click', toggleVibrate);
+      document.getElementById('vibrateBtn').addEventListener('touchend', e => { e.preventDefault(); toggleVibrate(); });
+
+      const unlockOnce = () => unlockAudioFromGesture();
+      document.body.addEventListener('touchstart', unlockOnce, { once: true, passive: true });
+      document.body.addEventListener('pointerdown', unlockOnce, { once: true });
+      document.body.addEventListener('click', unlockOnce, { once: true });
 
       bindStartOverlay();
 
@@ -883,6 +899,7 @@
     function toggleSound() {
       soundOn = !soundOn;
       updateSettingsButtons();
+      if (soundOn) unlockAudioFromGesture();
       syncAudioState();
       showToast(soundOn ? '声音已开启' : '声音已关闭', '#ffd93d');
     }
@@ -912,6 +929,17 @@
       if (!ctx) return null;
       if (ctx.state === 'suspended') ctx.resume().catch(() => {});
       return ctx;
+    }
+
+    function unlockAudioFromGesture() {
+      if (audioUnlocked) return;
+      audioUnlocked = true;
+      ensureBgmTracks();
+      ensureAudioRunning();
+      if (!soundOn) return;
+      const kind = pendingBgmKind || (gameState === 'playing' ? 'game' : 'menu');
+      pendingBgmKind = '';
+      playBgm(kind);
     }
 
     function createNoiseBuffer(ctx, duration = 0.2) {
@@ -1045,10 +1073,16 @@
       if (prev && prev !== next) pauseBgm(prev);
       activeBgm = kind;
       if (!soundOn) return;
+      if (!audioUnlocked) {
+        pendingBgmKind = kind;
+        return;
+      }
       ensureAudioRunning();
       if (next.paused) {
         next.currentTime = 0;
-        next.play().catch(() => {});
+        next.play().catch(() => {
+          pendingBgmKind = kind;
+        });
       }
     }
 
