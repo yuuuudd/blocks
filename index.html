@@ -1532,10 +1532,14 @@
         for (let y = 0; y < ROWS; y++) grid[y][x] = 0;
       }
 
-      function shiftUpOne() {
+      const midY = Math.floor(ROWS / 2);
+      const midX = Math.floor(COLS / 2);
+
+      function shiftUpStripFrom(edgeY) {
         const midY = Math.floor(ROWS / 2);
         if (midY <= 0) return;
-        for (let y = 0; y < midY - 1; y++) {
+        const startY = Math.max(0, Math.min(edgeY, midY - 1));
+        for (let y = startY; y < midY - 1; y++) {
           for (let x = 0; x < COLS; x++) {
             grid[y][x] = grid[y + 1][x];
           }
@@ -1543,10 +1547,10 @@
         for (let x = 0; x < COLS; x++) grid[midY - 1][x] = 0;
       }
 
-      function shiftDownOne() {
-        const midY = Math.floor(ROWS / 2);
+      function shiftDownStripTo(edgeY) {
         if (midY >= ROWS) return;
-        for (let y = ROWS - 1; y > midY; y--) {
+        const endY = Math.max(midY, Math.min(edgeY, ROWS - 1));
+        for (let y = endY; y > midY; y--) {
           for (let x = 0; x < COLS; x++) {
             grid[y][x] = grid[y - 1][x];
           }
@@ -1554,30 +1558,27 @@
         for (let x = 0; x < COLS; x++) grid[midY][x] = 0;
       }
 
-      function shiftLeftOne() {
-        const midX = Math.floor(COLS / 2);
+      function shiftLeftStripFrom(edgeX) {
         if (midX <= 0) return;
         for (let y = 0; y < ROWS; y++) {
-          for (let x = 0; x < midX - 1; x++) {
+          const startX = Math.max(0, Math.min(edgeX, midX - 1));
+          for (let x = startX; x < midX - 1; x++) {
             grid[y][x] = grid[y][x + 1];
           }
           grid[y][midX - 1] = 0;
         }
       }
 
-      function shiftRightOne() {
-        const midX = Math.floor(COLS / 2);
+      function shiftRightStripTo(edgeX) {
         if (midX >= COLS) return;
+        const endX = Math.max(midX, Math.min(edgeX, COLS - 1));
         for (let y = 0; y < ROWS; y++) {
-          for (let x = COLS - 1; x > midX; x--) {
+          for (let x = endX; x > midX; x--) {
             grid[y][x] = grid[y][x - 1];
           }
           grid[y][midX] = 0;
         }
       }
-
-      const midY = Math.floor(ROWS / 2);
-      const midX = Math.floor(COLS / 2);
 
       while (true) {
         const rowsToClear = [];
@@ -1592,31 +1593,21 @@
 
         if (rowsToClear.length === 0 && colsToClear.length === 0) break;
 
-        let upCount = 0;
-        let downCount = 0;
-        let leftCount = 0;
-        let rightCount = 0;
-
         for (const y of rowsToClear) {
           collectRowItems(y);
           clearRow(y);
-          if (y < midY) upCount += 1;
-          else downCount += 1;
+          if (y < midY) shiftUpStripFrom(y);
+          else shiftDownStripTo(y);
         }
         for (const x of colsToClear) {
           collectColItems(x);
           clearCol(x);
-          if (x < midX) leftCount += 1;
-          else rightCount += 1;
+          if (x < midX) shiftLeftStripFrom(x);
+          else shiftRightStripTo(x);
         }
 
         const stepCount = rowsToClear.length + colsToClear.length;
         removed += stepCount;
-
-        for (let i = 0; i < upCount; i++) shiftUpOne();
-        for (let i = 0; i < downCount; i++) shiftDownOne();
-        for (let i = 0; i < leftCount; i++) shiftLeftOne();
-        for (let i = 0; i < rightCount; i++) shiftRightOne();
       }
 
       if (removed > 0) {
