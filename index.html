@@ -354,6 +354,19 @@
       margin-top: 12px;
       z-index: 25;
     }
+    @media (max-width: 560px) {
+      #overlay {
+        padding-bottom: 20px;
+      }
+      #overlay .btn {
+        position: static;
+        width: calc(100% - 24px);
+        margin: 8px 12px 0;
+      }
+      #overlay .mode-section:last-of-type {
+        margin-bottom: 8px;
+      }
+    }
     #pauseOverlay {
       position: absolute;
       top: 0; left: 0; right: 0; bottom: 0;
@@ -1194,6 +1207,7 @@
           return;
         case 'gameOver':
           playTone({ type: 'sine', frequency: 180, toFrequency: 60, duration: 0.9, gain: 0.1, attack: 0.004, hold: 0.02, release: 0.28 });
+          playTone({ type: 'triangle', frequency: 260, toFrequency: 120, duration: 0.55, gain: 0.06, attack: 0.003, hold: 0.016, release: 0.16 });
           playNoise({ duration: 0.6, gain: 0.04, attack: 0.004, hold: 0.02, release: 0.15, filterFrequency: 900, filterQ: 0.8, sweepTo: 180 });
           return;
         case 'start':
