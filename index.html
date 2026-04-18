@@ -543,7 +543,7 @@
         <div id="infoTools">
           <button class="chipBtn" id="ruleBtn">规则</button>
           <button class="chipBtn" id="scoreBtn">得分</button>
-          <button class="chipBtn" id="soundBtn">音效关</button>
+          <button class="chipBtn" id="soundBtn">声音关</button>
           <button class="chipBtn" id="vibrateBtn">震动关</button>
         </div>
         <div id="panelRules" class="hidden"></div>
@@ -658,6 +658,9 @@
     let soundOn = false;
     let vibrateOn = false;
     let audioCtx = null;
+    let menuBgm = null;
+    let gameBgm = null;
+    let activeBgm = '';
 
     // ============== 初始化 ==============
     function init() {
@@ -716,6 +719,7 @@
       }
 
       renderIdle();
+      syncAudioState();
     }
 
     function bindStartOverlay() {
@@ -830,6 +834,7 @@
       updateItemBar();
       setPausedUI(false);
       renderIdle();
+      syncAudioState();
     }
 
     function toggleRulesPanel() {
@@ -871,14 +876,15 @@
     function updateSettingsButtons() {
       const s = document.getElementById('soundBtn');
       const v = document.getElementById('vibrateBtn');
-      if (s) s.textContent = soundOn ? '音效开' : '音效关';
+      if (s) s.textContent = soundOn ? '声音开' : '声音关';
       if (v) v.textContent = vibrateOn ? '震动开' : '震动关';
     }
 
     function toggleSound() {
       soundOn = !soundOn;
       updateSettingsButtons();
-      showToast(soundOn ? '音效已开启' : '音效已关闭', '#ffd93d');
+      syncAudioState();
+      showToast(soundOn ? '声音已开启' : '声音已关闭', '#ffd93d');
     }
 
     function toggleVibrate() {
@@ -894,21 +900,175 @@
       navigator.vibrate(pattern);
     }
 
-    function beep(freq = 440, ms = 60, gain = 0.05) {
-      if (!soundOn) return;
+    function ensureAudioContext() {
       const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return;
+      if (!Ctx) return null;
       if (!audioCtx) audioCtx = new Ctx();
-      const osc = audioCtx.createOscillator();
-      const g = audioCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      g.gain.value = gain;
-      osc.connect(g);
-      g.connect(audioCtx.destination);
-      const now = audioCtx.currentTime;
-      osc.start(now);
-      osc.stop(now + ms / 1000);
+      return audioCtx;
+    }
+
+    function ensureAudioRunning() {
+      const ctx = ensureAudioContext();
+      if (!ctx) return null;
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      return ctx;
+    }
+
+    function createNoiseBuffer(ctx, duration = 0.2) {
+      const buffer = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * duration)), ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      return buffer;
+    }
+
+    function scheduleEnvelope(gainNode, ctx, attack, hold, release, peak = 1.0) {
+      const now = ctx.currentTime;
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(0.0001, now);
+      gainNode.gain.linearRampToValueAtTime(peak, now + attack);
+      gainNode.gain.setValueAtTime(peak, now + attack + hold);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, now + attack + hold + release);
+    }
+
+    function playTone({ type = 'sine', frequency = 440, toFrequency = null, duration = 0.12, gain = 0.05, attack = 0.004, hold = 0.02, release = 0.08, filterType = '', filterFrequency = 0, filterQ = 0.8 }) {
+      if (!soundOn) return;
+      const ctx = ensureAudioRunning();
+      if (!ctx) return;
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(frequency, ctx.currentTime);
+      if (toFrequency !== null) {
+        osc.frequency.exponentialRampToValueAtTime(Math.max(1, toFrequency), ctx.currentTime + duration);
+      }
+      gainNode.gain.value = 0.0001;
+      if (filterType) {
+        const filter = ctx.createBiquadFilter();
+        filter.type = filterType;
+        filter.frequency.value = filterFrequency;
+        filter.Q.value = filterQ;
+        osc.connect(filter);
+        filter.connect(gainNode);
+      } else {
+        osc.connect(gainNode);
+      }
+      gainNode.connect(ctx.destination);
+      scheduleEnvelope(gainNode, ctx, attack, hold, release, gain);
+      osc.start();
+      osc.stop(ctx.currentTime + duration + 0.02);
+    }
+
+    function playNoise({ duration = 0.14, gain = 0.05, attack = 0.004, hold = 0.02, release = 0.08, filterType = 'bandpass', filterFrequency = 1600, filterQ = 0.7, sweepTo = null }) {
+      if (!soundOn) return;
+      const ctx = ensureAudioRunning();
+      if (!ctx) return;
+      const source = ctx.createBufferSource();
+      source.buffer = createNoiseBuffer(ctx, Math.max(duration, 0.1));
+      const filter = ctx.createBiquadFilter();
+      filter.type = filterType;
+      filter.frequency.setValueAtTime(filterFrequency, ctx.currentTime);
+      if (sweepTo !== null) {
+        filter.frequency.exponentialRampToValueAtTime(Math.max(30, sweepTo), ctx.currentTime + duration);
+      }
+      filter.Q.value = filterQ;
+      const gainNode = ctx.createGain();
+      source.connect(filter);
+      filter.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      scheduleEnvelope(gainNode, ctx, attack, hold, release, gain);
+      source.start();
+      source.stop(ctx.currentTime + duration + 0.02);
+    }
+
+    function playSfx(kind) {
+      if (!soundOn) return;
+      switch (kind) {
+        case 'move':
+          playTone({ type: 'square', frequency: 440, duration: 0.05, gain: 0.03, attack: 0.002, hold: 0.012, release: 0.03 });
+          return;
+        case 'land':
+          playTone({ type: 'sine', frequency: 110, toFrequency: 78, duration: 0.16, gain: 0.08, attack: 0.002, hold: 0.018, release: 0.11 });
+          return;
+        case 'clear1':
+          playTone({ type: 'sine', frequency: 880, duration: 0.18, gain: 0.05, attack: 0.003, hold: 0.016, release: 0.08 });
+          return;
+        case 'clear2':
+          playTone({ type: 'sine', frequency: 660, toFrequency: 494, duration: 0.22, gain: 0.055, attack: 0.003, hold: 0.02, release: 0.1 });
+          return;
+        case 'clear3':
+          playTone({ type: 'sawtooth', frequency: 42, duration: 0.5, gain: 0.06, attack: 0.004, hold: 0.04, release: 0.18 });
+          playTone({ type: 'sine', frequency: 120, duration: 0.45, gain: 0.02, attack: 0.002, hold: 0.02, release: 0.14 });
+          return;
+        case 'clear4':
+          playNoise({ duration: 0.8, gain: 0.06, attack: 0.004, hold: 0.04, release: 0.22, filterFrequency: 2400, filterQ: 0.7, sweepTo: 7200 });
+          return;
+        case 'itemCollect':
+          playTone({ type: 'triangle', frequency: 740, toFrequency: 1040, duration: 0.12, gain: 0.045, attack: 0.003, hold: 0.012, release: 0.06 });
+          return;
+        case 'itemUse':
+          playTone({ type: 'square', frequency: 360, duration: 0.08, gain: 0.05, attack: 0.002, hold: 0.01, release: 0.05 });
+          return;
+        case 'gameOver':
+          playTone({ type: 'sine', frequency: 180, toFrequency: 60, duration: 0.9, gain: 0.08, attack: 0.004, hold: 0.02, release: 0.28 });
+          playNoise({ duration: 0.6, gain: 0.025, attack: 0.004, hold: 0.02, release: 0.15, filterFrequency: 900, filterQ: 0.8, sweepTo: 180 });
+          return;
+        default:
+          return;
+      }
+    }
+
+    function ensureBgmTracks() {
+      if (!menuBgm) {
+        menuBgm = new Audio('Assets/Audio/Enum.mp3');
+        menuBgm.loop = true;
+        menuBgm.preload = 'auto';
+        menuBgm.volume = 0.45;
+      }
+      if (!gameBgm) {
+        gameBgm = new Audio('Assets/Audio/Main.mp3');
+        gameBgm.loop = true;
+        gameBgm.preload = 'auto';
+        gameBgm.volume = 0.45;
+      }
+    }
+
+    function pauseBgm(track) {
+      if (!track) return;
+      track.pause();
+      try { track.currentTime = 0; } catch (_) {}
+    }
+
+    function playBgm(kind) {
+      ensureBgmTracks();
+      const next = kind === 'game' ? gameBgm : menuBgm;
+      const prev = activeBgm === 'game' ? gameBgm : activeBgm === 'menu' ? menuBgm : null;
+      if (prev && prev !== next) pauseBgm(prev);
+      activeBgm = kind;
+      if (!soundOn) return;
+      ensureAudioRunning();
+      if (next.paused) {
+        next.currentTime = 0;
+        next.play().catch(() => {});
+      }
+    }
+
+    function stopBgm() {
+      ensureBgmTracks();
+      pauseBgm(menuBgm);
+      pauseBgm(gameBgm);
+      activeBgm = '';
+    }
+
+    function syncAudioState() {
+      if (!soundOn) {
+        stopBgm();
+        return;
+      }
+      if (gameState === 'playing') {
+        playBgm('game');
+        return;
+      }
+      playBgm('menu');
     }
 
     function weightedPick(list, getWeight) {
@@ -1012,9 +1172,8 @@
       if (toastText) showToast(toastText, toastColor);
       if (showDelta) showScoreDelta(points);
       bumpScore();
-      if (part === 'clear') { beep(520, 70, 0.06); vibrate(10); }
-      if (part === 'balance') { beep(640, 80, 0.05); vibrate([12, 20, 12]); }
-      if (part === 'itemUse') { beep(360, 70, 0.05); vibrate(18); }
+      if (part === 'balance') { playSfx('clear2'); vibrate([12, 20, 12]); }
+      if (part === 'itemUse') { playSfx('itemUse'); vibrate(18); }
     }
 
     function onOrient(e) {
@@ -1080,6 +1239,7 @@
       updateItemBar();
       spawnPiece();
       lastTime = performance.now();
+      syncAudioState();
       requestAnimationFrame(loop);
     }
 
@@ -1166,6 +1326,7 @@
           // 下一格是否可以移动（不出界、不碰物）
           if (!outOfBounds(nx, piece.y, piece.shape) && !overlapsGrid(nx, piece.y, piece.shape)) {
             piece.x = nx;
+            playSfx('move');
           }
           // 如果下一格就已经是停止条件（无法继续该方向），则停下
           // 注意：不需要额外处理，方块保持在当前格不动，但不锁定
@@ -1186,6 +1347,7 @@
           const ny = piece.y + dy;
           if (!outOfBounds(piece.x, ny, piece.shape) && !overlapsGrid(piece.x, ny, piece.shape)) {
             piece.y = ny;
+            playSfx('move');
           }
         }
       } else {
@@ -1283,6 +1445,7 @@
         return;
       }
       inventory.push(itemTypeId);
+      playSfx('itemCollect');
       updateItemBar();
       addScorePart('itemCollect', ITEM_SCORES.collect, `获得道具 +${ITEM_SCORES.collect}`, '#ffd93d');
     }
@@ -1470,6 +1633,7 @@
     // ============== 固定 ==============
     function settlePiece() {
       if (!piece) return;
+      playSfx('land');
       const c = piece.color + 1;
       piecePlaced += 1;
       const preEdge = getEdgeCounts(2);
@@ -1616,6 +1780,10 @@
         if (clearsEl) clearsEl.textContent = `${clears}`;
         const bonus = [100, 300, 600, 1000, 1500][Math.min(removed - 1, 4)];
         addScorePart('clear', bonus, '', '#64ffda', true);
+        if (removed === 1) playSfx('clear1');
+        else if (removed === 2) playSfx('clear2');
+        else if (removed === 3) playSfx('clear3');
+        else playSfx('clear4');
         // 消除闪光效果
         flashEffect();
       }
@@ -1824,6 +1992,7 @@
     // ============== 游戏结束 ==============
     function gameOver(reason = '') {
       gameState = 'over';
+      playSfx('gameOver');
       updateRestartVisibility();
       updateInfoVisibility();
       updatePauseVisibility();
@@ -1879,6 +2048,7 @@
         <button class="btn" id="restartBtn">再来一局</button>
       `;
       ov.classList.remove('hidden');
+      syncAudioState();
       updateItemBar();
       document.querySelectorAll('#modeGroup2 .mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
