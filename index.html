@@ -1881,9 +1881,13 @@
         yBlocked = outOfBounds(piece.x, ny, piece.shape) || overlapsGrid(piece.x, ny, piece.shape);
       }
 
-      // 只有在倾斜的方向被完全阻挡时才固定
-      // 规则：如果同时倾斜X和Y，两个方向都被堵才固定；单方向倾斜时那个方向被堵就固定
-      if (hasX && hasY) return xBlocked && yBlocked;
+      // 双轴输入时按主倾斜轴判定，避免轻微抖动导致“永不固定”。
+      if (hasX && hasY) {
+        const ax = Math.abs(tiltX);
+        const ay = Math.abs(tiltY);
+        if (Math.abs(ax - ay) <= 4) return xBlocked || yBlocked;
+        return ax > ay ? xBlocked : yBlocked;
+      }
       if (hasX) return xBlocked;
       if (hasY) return yBlocked;
       return false;
