@@ -574,14 +574,32 @@
     };
 
     const SHAPE_DEFS = [
-      { key: 'O',  weight: 16, shape: [[0,0],[1,0],[0,1],[1,1]] },
-      { key: 'I3H',weight: 14, shape: [[0,0],[1,0],[2,0]] },
-      { key: 'I3V',weight: 14, shape: [[0,0],[0,1],[0,2]] },
-      { key: 'L',  weight: 14, shape: [[0,0],[0,1],[1,1]] },
-      { key: 'J',  weight: 14, shape: [[1,0],[1,1],[0,1]] },
-      { key: 'T',  weight: 14, shape: [[0,0],[1,0],[2,0],[1,1]] },
-      { key: 'Z',  weight: 14, shape: [[0,0],[1,0],[1,1],[2,1]] },
-      { key: 'S1', weight: 0,  shape: [[0,0]] },
+      { key: 'O',   weight: 16, shape: [[0,0],[1,0],[0,1],[1,1]] },
+
+      { key: 'I3H', weight: 14, shape: [[0,0],[1,0],[2,0]] },
+      { key: 'I3V', weight: 14, shape: [[0,0],[0,1],[0,2]] },
+
+      { key: 'L0',  weight: 4,  shape: [[0,0],[0,1],[1,1]] },
+      { key: 'L1',  weight: 4,  shape: [[0,0],[1,0],[0,1]] },
+      { key: 'L2',  weight: 4,  shape: [[0,0],[1,0],[1,1]] },
+      { key: 'L3',  weight: 4,  shape: [[1,0],[0,1],[1,1]] },
+
+      { key: 'J0',  weight: 4,  shape: [[1,0],[1,1],[0,1]] },
+      { key: 'J1',  weight: 4,  shape: [[0,0],[0,1],[1,0]] },
+      { key: 'J2',  weight: 4,  shape: [[0,0],[1,0],[0,1]] },
+      { key: 'J3',  weight: 4,  shape: [[0,0],[1,0],[1,1]] },
+
+      { key: 'TU',  weight: 4,  shape: [[0,0],[1,0],[2,0],[1,1]] },
+      { key: 'TR',  weight: 4,  shape: [[1,0],[0,1],[1,1],[1,2]] },
+      { key: 'TD',  weight: 4,  shape: [[1,0],[0,1],[1,1],[2,1]] },
+      { key: 'TL',  weight: 4,  shape: [[0,0],[0,1],[1,1],[0,2]] },
+
+      { key: 'ZH',  weight: 4,  shape: [[0,0],[1,0],[1,1],[2,1]] },
+      { key: 'ZV',  weight: 4,  shape: [[1,0],[0,1],[1,1],[0,2]] },
+      { key: 'SH',  weight: 4,  shape: [[1,0],[2,0],[0,1],[1,1]] },
+      { key: 'SV',  weight: 4,  shape: [[0,0],[0,1],[1,1],[1,2]] },
+
+      { key: 'S1',  weight: 0,  shape: [[0,0]] },
     ];
 
     const ITEM_TYPES = {
@@ -1479,38 +1497,89 @@
     function checkLines() {
       let removed = 0;
 
-      // 检查行
-      for (let y = ROWS - 1; y >= 0; y--) {
-        if (grid[y].every(c => c !== 0)) {
-          for (let x = 0; x < COLS; x++) {
-            const cell = grid[y][x];
-            const { itemTypeId } = decodeCell(cell);
-            if (itemTypeId) collectItem(itemTypeId);
-          }
-          grid.splice(y, 1);
-          grid.unshift(new Array(COLS).fill(0));
-          removed++; y++;
+      function rowFull(y) {
+        return grid[y].every(c => c !== 0);
+      }
+
+      function colFull(x) {
+        for (let y = 0; y < ROWS; y++) {
+          if (grid[y][x] === 0) return false;
+        }
+        return true;
+      }
+
+      function collectRowItems(y) {
+        for (let x = 0; x < COLS; x++) {
+          const cell = grid[y][x];
+          const { itemTypeId } = decodeCell(cell);
+          if (itemTypeId) collectItem(itemTypeId);
         }
       }
 
-      // 检查列
-      for (let x = COLS - 1; x >= 0; x--) {
-        let full = true;
+      function collectColItems(x) {
         for (let y = 0; y < ROWS; y++) {
-          if (grid[y][x] === 0) { full = false; break; }
+          const cell = grid[y][x];
+          const { itemTypeId } = decodeCell(cell);
+          if (itemTypeId) collectItem(itemTypeId);
         }
-        if (full) {
-          for (let y = 0; y < ROWS; y++) {
-            const cell = grid[y][x];
-            const { itemTypeId } = decodeCell(cell);
-            if (itemTypeId) collectItem(itemTypeId);
-          }
-          for (let y = 0; y < ROWS; y++) {
-            grid[y].splice(x, 1);
-            grid[y].unshift(0);
-          }
-          removed++; x++;
+      }
+
+      function shiftUpOne() {
+        grid.shift();
+        grid.push(new Array(COLS).fill(0));
+      }
+
+      function shiftDownOne() {
+        grid.pop();
+        grid.unshift(new Array(COLS).fill(0));
+      }
+
+      function shiftLeftOne() {
+        for (let y = 0; y < ROWS; y++) {
+          grid[y].shift();
+          grid[y].push(0);
         }
+      }
+
+      function shiftRightOne() {
+        for (let y = 0; y < ROWS; y++) {
+          grid[y].pop();
+          grid[y].unshift(0);
+        }
+      }
+
+      while (true) {
+        let did = false;
+
+        if (rowFull(0)) {
+          collectRowItems(0);
+          shiftUpOne();
+          removed += 1;
+          did = true;
+        }
+
+        if (rowFull(ROWS - 1)) {
+          collectRowItems(ROWS - 1);
+          shiftDownOne();
+          removed += 1;
+          did = true;
+        }
+
+        if (colFull(0)) {
+          collectColItems(0);
+          shiftLeftOne();
+          removed += 1;
+          did = true;
+        }
+
+        if (colFull(COLS - 1)) {
+          collectColItems(COLS - 1);
+          shiftRightOne();
+          removed += 1;
+          did = true;
+        }
+
+        if (!did) break;
       }
 
       if (removed > 0) {
