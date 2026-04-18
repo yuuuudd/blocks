@@ -664,31 +664,29 @@
     ];
 
     const ITEM_TYPES = {
-      bomb:  { id: 1, icon: '💣', label: 'B' },
-      fill:  { id: 2, icon: '🛠️', label: 'F' },
-      laser: { id: 3, icon: '⚡', label: 'L' },
-      clean: { id: 4, icon: '🧹', label: 'C' },
-      single:{ id: 5, icon: '📦', label: '1' },
-      shuffle:{ id: 6, icon: '🔀', label: 'S' },
+      coldBomb: { id: 1, icon: '💣', label: 'B' },
+      defuse:   { id: 2, icon: '✂️', label: 'D' },
+      laser:    { id: 3, icon: '⚡', label: 'L' },
+      magnet:   { id: 4, icon: '🧲', label: 'M' },
     };
     const ITEM_LIST = [
-      { type: ITEM_TYPES.bomb, weight: 18 },
-      { type: ITEM_TYPES.fill, weight: 18 },
-      { type: ITEM_TYPES.laser, weight: 16 },
-      { type: ITEM_TYPES.clean, weight: 14 },
-      { type: ITEM_TYPES.shuffle, weight: 12 },
-      { type: ITEM_TYPES.single, weight: 10 },
+      { type: ITEM_TYPES.coldBomb, weight: 35 },
+      { type: ITEM_TYPES.defuse, weight: 25 },
+      { type: ITEM_TYPES.laser, weight: 20 },
+      { type: ITEM_TYPES.magnet, weight: 20 },
     ];
     const ITEM_OFFSET = 100;
     const ITEM_SCORES = {
       collect: 80,
-      bombPerCell: 20,
-      laserPerCell: 15,
-      cleanPerCell: 10,
-      fillPerCell: 50,
-      shuffle: 100,
+      litBombPerCell: 5,
+      coldBombPerCell: 12,
+      laserPerCell: 12,
+      magnet: 0,
     };
     const INVENTORY_SIZE = 4;
+    const LIT_BOMB_MS = 3000;
+    const LIT_BOMB_TRIGGER_EVERY = 6;
+    const WORLD_PICKUP_TRIGGER_EVERY = 4;
     const SFX_GAIN_MULT = 1.45;
     const BGM_VOLUME = 0.24;
     const TAP_DROP_BOOST_MULT = 2.8;
@@ -735,6 +733,7 @@
     let scoreParts = {};
     let itemUseCount = 0;
     let metricsAcc = 0;
+    let currentFillPct = 0;
     let startOverlayHTML = '';
     let soundOn = true;
     let vibrateOn = false;
@@ -742,6 +741,9 @@
     let menuBgm = null;
     let gameBgm = null;
     let activeBgm = '';
+    let worldPickups = [];
+    let explosions = [];
+    let particles = [];
     let audioUnlocked = false;
     let pendingBgmKind = '';
     let lastSfxAt = {};
@@ -1236,9 +1238,7 @@
     }
 
     function getItemSpawnRate() {
-      if (selectedDiff === 'easy') return 0.14;
-      if (selectedDiff === 'hard') return 0.10;
-      return 0.12;
+      return 0;
     }
 
     function encodeCell(colorIndex1, itemTypeId = 0) {
@@ -1383,6 +1383,10 @@
       maxFill = 0;
       itemUseCount = 0;
       metricsAcc = 0;
+      currentFillPct = 0;
+      worldPickups = [];
+      explosions = [];
+      particles = [];
       scoreParts = { placement: 0, clear: 0, balance: 0, itemCollect: 0, itemUse: 0 };
       document.getElementById('score').textContent = 0;
       const clearsEl = document.getElementById('clears');
@@ -1396,6 +1400,7 @@
       updateSettingsButtons();
       setPausedUI(false);
       updateItemBar();
+      ensureWorldPickups();
       spawnPiece();
       lastTime = performance.now();
       syncAudioState();
@@ -1427,14 +1432,7 @@
       const cx = Math.floor((COLS - maxPx - 1) / 2);
       const cy = Math.floor((ROWS - maxPy - 1) / 2);
 
-      let itemTypeId = 0;
-      let itemIndex = -1;
-      if (gameMode === 'items' && Math.random() < getItemSpawnRate()) {
-        const entry = weightedPick(ITEM_LIST, e => e.weight);
-        itemTypeId = entry.type.id;
-        itemIndex = Math.floor(Math.random() * shape.length);
-      }
-      piece = { x: cx, y: cy, color, shape, itemTypeId, itemIndex };
+      piece = { x: cx, y: cy, color, shape, itemTypeId: 0, itemIndex: -1 };
 
       if (overlapsGrid(piece.x, piece.y, piece.shape)) {
         gameOver();
@@ -1448,6 +1446,7 @@
       lastTime = ts;
       update(dt);
       updateMetrics(dt);
+      updateEffects(dt);
       refreshScorePanel();
       render();
       requestAnimationFrame(loop);
@@ -1465,9 +1464,28 @@
         }
       }
       const pct = total > 0 ? Math.min(100, Math.round((filled / total) * 100)) : 0;
+      currentFillPct = pct;
       if (pct > maxFill) maxFill = pct;
       const fillEl = document.getElementById('fill');
       if (fillEl) fillEl.textContent = `${pct}%`;
+      ensureWorldPickups();
+    }
+
+    function updateEffects(dt) {
+      for (let i = explosions.length - 1; i >= 0; i--) {
+        const ex = explosions[i];
+        ex.t += dt;
+        if (ex.t >= ex.maxT) explosions.splice(i, 1);
+      }
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.t += dt;
+        p.x += p.vx * (dt / 16.67) * CELL * 0.05;
+        p.y += p.vy * (dt / 16.67) * CELL * 0.05;
+        p.vx *= 0.985;
+        p.vy *= 0.985;
+        if (p.t >= p.life) particles.splice(i, 1);
+      }
     }
 
     // ============== 更新（核心：下一步碰才停）==============
@@ -1477,6 +1495,58 @@
       const speedMult = DIFF_CONFIG[selectedDiff].speedMult;
       const boostActive = performance.now() < tapDropBoostUntil;
       const effectiveTiltY = (boostActive && Math.abs(tiltY) < MIN_ANGLE) ? TAP_DROP_MIN_ANGLE : tiltY;
+
+      if (piece.isLitBomb) {
+        if (Math.abs(tiltX) >= MIN_ANGLE) {
+          const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(tiltX)));
+          const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * speedMult;
+          const interval = 1000 / Math.max(0.001, speed);
+          moveAccX += dt;
+          while (moveAccX >= interval) {
+            moveAccX -= interval;
+            const dx = tiltX < 0 ? -1 : 1;
+            const nx = piece.x + dx;
+            if (!outOfBounds(nx, piece.y, piece.shape) && !overlapsGrid(nx, piece.y, piece.shape)) {
+              piece.x = nx;
+              playSfx('move');
+            }
+          }
+        } else {
+          moveAccX = 0;
+        }
+
+        if (Math.abs(effectiveTiltY) >= MIN_ANGLE) {
+          const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(effectiveTiltY)));
+          const yMult = boostActive ? speedMult * TAP_DROP_BOOST_MULT : speedMult;
+          const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * yMult;
+          const interval = 1000 / Math.max(0.001, speed);
+          moveAccY += dt;
+          while (moveAccY >= interval) {
+            moveAccY -= interval;
+            const dy = effectiveTiltY < 0 ? -1 : 1;
+            const ny = piece.y + dy;
+            if (!outOfBounds(piece.x, ny, piece.shape) && !overlapsGrid(piece.x, ny, piece.shape)) {
+              piece.y = ny;
+              playSfx('move');
+            }
+          }
+        } else {
+          moveAccY = 0;
+        }
+
+        const now = performance.now();
+        if (now >= piece.bombEndsAt) {
+          const { x: cx, y: cy } = getPieceCenterCell(piece);
+          piece = null;
+          explode3x3(cx, cy, true);
+          const removed = checkLines();
+          applyBalanceReward(removed);
+          maybeSpawnWorldPickup();
+          ensureWorldPickups();
+          spawnPiece();
+        }
+        return;
+      }
 
       // X方向
       if (Math.abs(tiltX) >= MIN_ANGLE) {
@@ -1520,6 +1590,8 @@
         moveAccY = 0;
       }
 
+      collectPickupsForCurrentPiece();
+
       // 锁定判定：
       // 当且仅当 倾斜方向的"下一格"是墙/方块 时，才锁定（固定当前方块）
       if (shouldSettle(effectiveTiltY)) {
@@ -1527,6 +1599,9 @@
         if (gameState !== 'playing') return;
         const removed = checkLines();
         applyBalanceReward(removed);
+        maybeSpawnWorldPickup();
+        ensureWorldPickups();
+        if (maybeSpawnLitBombEvent()) return;
         spawnPiece();
       }
     }
@@ -1604,15 +1679,199 @@
       }, ms);
     }
 
-    function collectItem(itemTypeId) {
+    function getPickupCap() {
+      if (COLS <= 10) return 1;
+      if (COLS <= 15) return 2;
+      return 3;
+    }
+
+    function getPickupMinByFill(fillPct) {
+      const cap = getPickupCap();
+      if (fillPct >= 60) return Math.min(3, cap);
+      if (fillPct >= 45) return Math.min(2, cap);
+      if (fillPct >= 30) return Math.min(1, cap);
+      return 0;
+    }
+
+    function getPickupRollProb(fillPct) {
+      if (fillPct < 30) return 0.15;
+      if (fillPct < 45) return 0.30;
+      if (fillPct < 60) return 0.45;
+      return 0.60;
+    }
+
+    function getLitBombProb(fillPct) {
+      if (fillPct < 30) return 0.08;
+      if (fillPct < 45) return 0.14;
+      if (fillPct < 60) return 0.20;
+      return 0.28;
+    }
+
+    function getCenterCell() {
+      return { x: Math.floor((COLS - 1) / 2), y: Math.floor((ROWS - 1) / 2) };
+    }
+
+    function getPieceCenterCell(p) {
+      if (!p || !p.shape || p.shape.length === 0) return getCenterCell();
+      let sx = 0, sy = 0;
+      for (const [px, py] of p.shape) {
+        sx += p.x + px;
+        sy += p.y + py;
+      }
+      return {
+        x: Math.max(0, Math.min(COLS - 1, Math.round(sx / p.shape.length))),
+        y: Math.max(0, Math.min(ROWS - 1, Math.round(sy / p.shape.length))),
+      };
+    }
+
+    function findEmptyCellNearCenter() {
+      const { x: cx, y: cy } = getCenterCell();
+      if (!grid[cy][cx] && !isInCenterZone(cx, cy)) return { x: cx, y: cy };
+      const maxR = Math.max(COLS, ROWS);
+      for (let r = 0; r <= maxR; r++) {
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dx = -r; dx <= r; dx++) {
+            const x = cx + dx;
+            const y = cy + dy;
+            if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
+            if (isInCenterZone(x, y)) continue;
+            if (grid[y][x]) continue;
+            const exists = worldPickups.some(p => p.x === x && p.y === y);
+            if (exists) continue;
+            return { x, y };
+          }
+        }
+      }
+      return null;
+    }
+
+    function ensureWorldPickups() {
       if (gameMode !== 'items') return;
+      const cap = getPickupCap();
+      const min = getPickupMinByFill(currentFillPct);
+      while (worldPickups.length < min && worldPickups.length < cap) {
+        spawnWorldPickup();
+      }
+    }
+
+    function maybeSpawnWorldPickup() {
+      if (gameMode !== 'items') return;
+      const cap = getPickupCap();
+      if (worldPickups.length >= cap) return;
+      if (piecePlaced === 0) return;
+      if (piecePlaced % WORLD_PICKUP_TRIGGER_EVERY !== 0) return;
+      if (Math.random() > getPickupRollProb(currentFillPct)) return;
+      spawnWorldPickup();
+    }
+
+    function spawnWorldPickup() {
+      const spot = findEmptyCellNearCenter();
+      if (!spot) return;
+      const entry = weightedPick(ITEM_LIST, e => e.weight);
+      worldPickups.push({ x: spot.x, y: spot.y, itemTypeId: entry.type.id });
+    }
+
+    function maybeSpawnLitBombEvent() {
+      if (gameMode !== 'items') return false;
+      if (piece && piece.isLitBomb) return false;
+      if (piecePlaced === 0) return false;
+      if (piecePlaced % LIT_BOMB_TRIGGER_EVERY !== 0) return false;
+      if (Math.random() > getLitBombProb(currentFillPct)) return false;
+      const { x: cx, y: cy } = getCenterCell();
+      const bomb = { x: cx, y: cy, color: 0, shape: [[0,0]], itemTypeId: 0, itemIndex: -1, isLitBomb: true, bombEndsAt: performance.now() + LIT_BOMB_MS };
+      if (overlapsGrid(bomb.x, bomb.y, bomb.shape)) {
+        explode3x3(cx, cy, true);
+        spawnPiece();
+        return true;
+      }
+      piece = bomb;
+      showToast('点燃炸弹出现！', '#ff6b6b', 650);
+      playSfx('itemUse');
+      return true;
+    }
+
+    function pushInventory(itemTypeId, toastText = '') {
       if (inventory.length >= INVENTORY_SIZE) {
-        showToast('道具已满', '#ffd93d');
-        return;
+        const removed = inventory.shift();
+        const removedMeta = removed ? getItemById(removed) : null;
+        const removedName = removedMeta ? removedMeta.icon : '';
+        showToast(`背包已满：替换最早道具 ${removedName}`, '#ffd93d');
       }
       inventory.push(itemTypeId);
-      playSfx('itemCollect');
       updateItemBar();
+      if (toastText) showToast(toastText, '#ffd93d');
+    }
+
+    function collectWorldPickupAt(x, y) {
+      if (gameMode !== 'items') return false;
+      const idx = worldPickups.findIndex(p => p.x === x && p.y === y);
+      if (idx < 0) return false;
+      const p = worldPickups[idx];
+      worldPickups.splice(idx, 1);
+      pushInventory(p.itemTypeId);
+      playSfx('itemCollect');
+      addScorePart('itemCollect', ITEM_SCORES.collect, `获得道具 +${ITEM_SCORES.collect}`, '#ffd93d');
+      return true;
+    }
+
+    function collectPickupsForCurrentPiece() {
+      if (gameMode !== 'items') return;
+      if (!piece) return;
+      if (piece.isLitBomb) return;
+      for (const [px, py] of piece.shape) {
+        const wx = piece.x + px;
+        const wy = piece.y + py;
+        if (wx < 0 || wx >= COLS || wy < 0 || wy >= ROWS) continue;
+        if (collectWorldPickupAt(wx, wy)) return;
+      }
+    }
+
+    function explode3x3(cx, cy, isLit) {
+      let cleared = 0;
+      const removedPickups = [];
+      for (let y = cy - 1; y <= cy + 1; y++) {
+        for (let x = cx - 1; x <= cx + 1; x++) {
+          if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
+          const cell = grid[y][x];
+          if (cell) {
+            grid[y][x] = 0;
+            cleared += 1;
+          }
+          for (let i = worldPickups.length - 1; i >= 0; i--) {
+            const p = worldPickups[i];
+            if (p.x === x && p.y === y) {
+              removedPickups.push(worldPickups[i]);
+              worldPickups.splice(i, 1);
+            }
+          }
+        }
+      }
+
+      const scorePer = isLit ? ITEM_SCORES.litBombPerCell : ITEM_SCORES.coldBombPerCell;
+      if (cleared > 0) addScorePart('itemUse', cleared * scorePer, isLit ? `爆炸 +${cleared * scorePer}` : `小炸弹 +${cleared * scorePer}`, '#ff6b6b');
+
+      const ex = { x: cx, y: cy, t: 0, maxT: 520, isLit };
+      explosions.push(ex);
+      for (let i = 0; i < 44; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const sp = 0.7 + Math.random() * 2.2;
+        particles.push({
+          x: (cx + 0.5) * CELL,
+          y: (cy + 0.5) * CELL,
+          vx: Math.cos(ang) * sp,
+          vy: Math.sin(ang) * sp,
+          life: 520 + Math.random() * 220,
+          t: 0,
+          size: 1.6 + Math.random() * 2.8,
+        });
+      }
+      vibrate(isLit ? [18, 30, 18] : 18);
+    }
+
+    function collectItem(itemTypeId) {
+      if (gameMode !== 'items') return;
+      pushInventory(itemTypeId);
+      playSfx('itemCollect');
       addScorePart('itemCollect', ITEM_SCORES.collect, `获得道具 +${ITEM_SCORES.collect}`, '#ffd93d');
     }
 
@@ -1623,41 +1882,52 @@
       if (!itemTypeId) return;
       inventory.splice(slotIndex, 1);
       updateItemBar();
+      const consumed = useItem(itemTypeId);
+      if (!consumed) {
+        inventory.splice(slotIndex, 0, itemTypeId);
+        updateItemBar();
+        return;
+      }
       itemUseCount += 1;
-      useItem(itemTypeId);
     }
 
     function useItem(itemTypeId) {
-      if (itemTypeId === ITEM_TYPES.bomb.id) return useBomb();
-      if (itemTypeId === ITEM_TYPES.fill.id) return useFill();
+      if (itemTypeId === ITEM_TYPES.coldBomb.id) return useColdBomb();
+      if (itemTypeId === ITEM_TYPES.defuse.id) return useDefuse();
       if (itemTypeId === ITEM_TYPES.laser.id) return useLaser();
-      if (itemTypeId === ITEM_TYPES.clean.id) return useClean();
-      if (itemTypeId === ITEM_TYPES.single.id) return useSingleify();
-      if (itemTypeId === ITEM_TYPES.shuffle.id) return useShuffle();
+      if (itemTypeId === ITEM_TYPES.magnet.id) return useMagnet();
+      return true;
     }
 
-    function useBomb() {
-      const rows = Math.min(3, ROWS);
-      let cleared = 0;
-      for (let y = ROWS - 1; y >= ROWS - rows; y--) {
-        for (let x = 0; x < COLS; x++) {
-          const cell = grid[y][x];
-          if (!cell) continue;
-          const { itemTypeId } = decodeCell(cell);
-          if (itemTypeId) collectItem(itemTypeId);
-          grid[y][x] = 0;
-          cleared += 1;
-        }
+    function useColdBomb() {
+      if (!piece) {
+        showToast('没有可用目标', '#ffd93d');
+        return false;
       }
-      addScorePart('itemUse', cleared * ITEM_SCORES.bombPerCell, `炸弹 +${cleared * ITEM_SCORES.bombPerCell}`, '#ff6b6b');
+      const { x: cx, y: cy } = getPieceCenterCell(piece);
+      explode3x3(cx, cy, false);
       const removed = checkLines();
       applyBalanceReward(removed);
+      playSfx('itemUse');
+      return true;
+    }
+
+    function useDefuse() {
+      if (piece && piece.isLitBomb) {
+        piece = null;
+        pushInventory(ITEM_TYPES.coldBomb.id);
+        showToast('拆弹成功：获得小炸弹', '#ffd93d');
+        playSfx('itemUse');
+        return true;
+      }
+      showToast('当前无可拆除目标', '#8b949e');
+      return false;
     }
 
     function useLaser() {
       if (!piece) {
         showToast('没有可用目标', '#ffd93d');
-        return;
+        return false;
       }
       let sx = 0, sy = 0;
       for (const [px, py] of piece.shape) {
@@ -1687,6 +1957,48 @@
       addScorePart('itemUse', cleared * ITEM_SCORES.laserPerCell, `激光 +${cleared * ITEM_SCORES.laserPerCell}`, '#6bcbff');
       const removed = checkLines();
       applyBalanceReward(removed);
+      playSfx('itemUse');
+      return true;
+    }
+
+    function useMagnet() {
+      if (!piece) {
+        showToast('没有可用目标', '#ffd93d');
+        return false;
+      }
+      const { x: tx, y: ty } = getPieceCenterCell(piece);
+      const radius = 2;
+      const coords = [];
+      for (let y = Math.max(0, ty - radius); y <= Math.min(ROWS - 1, ty + radius); y++) {
+        for (let x = Math.max(0, tx - radius); x <= Math.min(COLS - 1, tx + radius); x++) {
+          if (!grid[y][x]) continue;
+          const dist = Math.abs(tx - x) + Math.abs(ty - y);
+          coords.push({ x, y, dist });
+        }
+      }
+      coords.sort((a, b) => b.dist - a.dist);
+      let moved = 0;
+      for (const c of coords) {
+        const v = grid[c.y][c.x];
+        if (!v) continue;
+        const dx = tx === c.x ? 0 : (tx > c.x ? 1 : -1);
+        const dy = ty === c.y ? 0 : (ty > c.y ? 1 : -1);
+        let nx = c.x;
+        let ny = c.y;
+        if (Math.abs(tx - c.x) >= Math.abs(ty - c.y)) nx = c.x + dx;
+        else ny = c.y + dy;
+        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
+        if (grid[ny][nx]) continue;
+        grid[ny][nx] = v;
+        grid[c.y][c.x] = 0;
+        moved += 1;
+      }
+      if (ITEM_SCORES.magnet) addScorePart('itemUse', ITEM_SCORES.magnet, `磁铁 +${ITEM_SCORES.magnet}`, '#64ffda');
+      showToast(moved > 0 ? '磁吸！' : '磁铁无效', '#64ffda', 650);
+      const removed = checkLines();
+      applyBalanceReward(removed);
+      playSfx('itemUse');
+      return true;
     }
 
     function useClean() {
@@ -2101,8 +2413,35 @@
         }
       }
 
+      if (gameMode === 'items') {
+        for (const p of worldPickups) {
+          const meta = getItemById(p.itemTypeId);
+          if (!meta) continue;
+          const px = p.x * CELL + CELL / 2;
+          const py = p.y * CELL + CELL / 2;
+          ctx.globalAlpha = 1;
+          ctx.shadowColor = 'rgba(255, 217, 61, 0.9)';
+          ctx.shadowBlur = 12;
+          ctx.fillStyle = 'rgba(255, 217, 61, 0.18)';
+          ctx.beginPath();
+          ctx.arc(px, py, Math.max(10, CELL * 0.28), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          ctx.font = `${Math.max(12, Math.floor(CELL * 0.42))}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(meta.label, px, py + 0.5);
+        }
+      }
+
       // 当前方块 + 边缘预警高亮
       if (piece) {
+        if (piece.isLitBomb) {
+          const remain = Math.max(0, Math.ceil((piece.bombEndsAt - performance.now()) / 1000));
+          const label = remain > 0 ? `${remain}` : '💣';
+          drawBlock(piece.x, piece.y, '#ff6b6b', 1, true, label);
+        } else {
         // 判断是否贴着任何边缘/方块（用于视觉提示）
         const nearEdge = isNearEdge();
         for (let i = 0; i < piece.shape.length; i++) {
@@ -2113,7 +2452,37 @@
             drawBlock(wx, wy, COLORS[piece.color], 1, nearEdge || !!item, item ? item.label : '');
           }
         }
+        }
       }
+
+      for (const ex of explosions) {
+        const p = Math.min(1, ex.t / ex.maxT);
+        const cxp = (ex.x + 0.5) * CELL;
+        const cyp = (ex.y + 0.5) * CELL;
+        const r = (CELL * 0.6) + p * (CELL * 3.0);
+        const alpha = (1 - p) * 0.65;
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = ex.isLit ? 'rgba(255,107,107,0.95)' : 'rgba(255,217,61,0.95)';
+        ctx.lineWidth = Math.max(2, CELL * 0.08);
+        ctx.beginPath();
+        ctx.arc(cxp, cyp, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = Math.min(0.18, alpha);
+        ctx.fillStyle = ex.isLit ? 'rgba(255,107,107,0.55)' : 'rgba(255,217,61,0.55)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.globalAlpha = 1;
+      }
+
+      for (const pt of particles) {
+        const p = Math.min(1, pt.t / pt.life);
+        const alpha = (1 - p) * 0.9;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
     }
 
     // 检查是否紧贴边/方块（当前倾斜方向的下一格）
