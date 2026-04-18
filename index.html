@@ -684,7 +684,7 @@
     const MIN_ANGLE = 2;
     const MAX_ANGLE = 75;
     const MAX_SPEED_CELLS_PER_SEC = 5;
-    const TILT_DEADZONE = 5;
+    const TILT_DEADZONE = 2;
     const MOVE_CURVE_EXP = 1.6;
     const MOVE_SMOOTH_MS = 80;
     const SETTLE_DELAY_MS = 180;
@@ -2059,7 +2059,7 @@
 
       // 锁定判定：
       // 当且仅当 倾斜方向的"下一格"是墙/方块 时，才锁定（固定当前方块）
-      if (shouldSettle(dt, moved, hasX, hasY, primary)) {
+      if (shouldSettle(dt, moved)) {
         settlePiece();
         if (gameState !== 'playing') return;
         const removed = checkLines();
@@ -2072,8 +2072,10 @@
     }
 
     // 判定是否需要固定：所有正在倾斜的方向的下一格都被阻挡
-    function shouldSettle(dt, moved, hasX, hasY, primary) {
-      if (!hasX && !hasY) {
+    function shouldSettle(dt, moved) {
+      const activeX = Math.abs(tiltX) >= MIN_ANGLE;
+      const activeY = Math.abs(tiltY) >= MIN_ANGLE;
+      if (!activeX && !activeY) {
         piece.blockedMs = 0;
         return false;
       }
@@ -2084,13 +2086,21 @@
 
       const dx = tiltX < 0 ? -1 : 1;
       const dy = tiltY < 0 ? -1 : 1;
-      const xBlocked = hasX ? (outOfBounds(piece.x + dx, piece.y, piece.shape) || overlapsGrid(piece.x + dx, piece.y, piece.shape)) : false;
-      const yBlocked = hasY ? (outOfBounds(piece.x, piece.y + dy, piece.shape) || overlapsGrid(piece.x, piece.y + dy, piece.shape)) : false;
+      const xBlocked = activeX ? (outOfBounds(piece.x + dx, piece.y, piece.shape) || overlapsGrid(piece.x + dx, piece.y, piece.shape)) : false;
+      const yBlocked = activeY ? (outOfBounds(piece.x, piece.y + dy, piece.shape) || overlapsGrid(piece.x, piece.y + dy, piece.shape)) : false;
 
-      // 按主倾斜轴判定固定，避免手机双轴微抖导致“贴边不落地”。
+      // 双轴倾斜时：主轴优先，接近等幅时任一阻挡即可固定，降低传感器抖动导致的漏判。
+      const ax = Math.abs(tiltX);
+      const ay = Math.abs(tiltY);
       let settleCond = false;
-      if (primary === 'x') settleCond = hasX ? xBlocked : (hasY && yBlocked);
-      else settleCond = hasY ? yBlocked : (hasX && xBlocked);
+      if (activeX && activeY) {
+        if (Math.abs(ax - ay) <= 4) settleCond = xBlocked || yBlocked;
+        else settleCond = ax > ay ? xBlocked : yBlocked;
+      } else if (activeX) {
+        settleCond = xBlocked;
+      } else {
+        settleCond = yBlocked;
+      }
 
       if (!settleCond) {
         piece.blockedMs = 0;
