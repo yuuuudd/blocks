@@ -980,6 +980,7 @@
 
       const unlockOnce = () => unlockAudioFromGesture();
       document.body.addEventListener('touchstart', unlockOnce, { passive: true });
+      document.body.addEventListener('touchend', unlockOnce, { passive: true });
       document.body.addEventListener('pointerdown', unlockOnce);
       document.body.addEventListener('click', unlockOnce);
 
@@ -1284,7 +1285,7 @@
     function unlockAudioFromGesture() {
       if (!audioUnlocked) audioUnlocked = true;
       ensureBgmTracks();
-      ensureAudioRunning();
+      try { ensureAudioRunning(); } catch (_) {}
       if (!soundOn) return;
       if (!bgmPrimed) primeBgmTracks();
       syncAudioState();
@@ -1294,19 +1295,29 @@
       if (bgmPrimed) return;
       bgmPrimed = true;
       ensureBgmTracks();
-      const srcs = [menuBgm, gameBgm, deathBgm]
-        .map(t => (t && (t.currentSrc || t.src)) || '')
-        .filter(Boolean);
-      for (const src of srcs) {
-        const ghost = new Audio(src);
-        ghost.preload = 'auto';
-        ghost.muted = true;
-        ghost.playsInline = true;
-        const p = ghost.play();
+      const tracks = [menuBgm, gameBgm, deathBgm];
+      for (const t of tracks) {
+        if (!t) continue;
+        const wasPlaying = !t.paused;
+        const prevMuted = t.muted;
+        t.muted = true;
+        const p = t.play();
         if (p && typeof p.then === 'function') {
           p.then(() => {
-            ghost.pause();
-          }).catch(() => {});
+            if (!wasPlaying) {
+              t.pause();
+              try { t.currentTime = 0; } catch (_) {}
+            }
+            t.muted = prevMuted;
+          }).catch(() => {
+            t.muted = prevMuted;
+          });
+        } else {
+          if (!wasPlaying) {
+            t.pause();
+            try { t.currentTime = 0; } catch (_) {}
+          }
+          t.muted = prevMuted;
         }
       }
     }
@@ -1506,7 +1517,7 @@
 
       const tryPlay = () => {
         if (!next.paused) return;
-        next.currentTime = 0;
+        try { next.currentTime = 0; } catch (_) {}
         const p = next.play();
         if (!p || typeof p.catch !== 'function') return;
         p.catch(() => {
@@ -1536,7 +1547,7 @@
         });
       };
 
-      ensureAudioRunning();
+      try { ensureAudioRunning(); } catch (_) {}
       if (next.paused) {
         tryPlay();
       }
