@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>重力方块</title>
+  <style>
+    * {
+      margin: 0; padding: 0;
+      box-sizing: border-box;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      overflow: hidden;
+    }
+    #gameContainer {
+      position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 0 40px rgba(100, 200, 255, 0.3);
+    }
+    #gameCanvas {
+      display: block;
+      background: #0d1117;
+    }
+    #ui {
+      position: absolute;
+      top: 8px;
+      left: 0; right: 0;
+      display: flex;
+      justify-content: space-between;
+      padding: 0 12px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: bold;
+      z-index: 10;
+      pointer-events: none;
+    }
+    #ui span { color: #64ffda; }
+    #modeLabel {
+      font-size: 11px;
+      color: #ffd93d;
+    }
+    #overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(13, 17, 23, 0.96);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+      color: #fff;
+    }
+    #overlay h1 {
+      font-size: 26px;
+      margin-bottom: 6px;
+      background: linear-gradient(90deg, #64ffda, #ff6b6b);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    #overlay .subtitle {
+      font-size: 12px;
+      color: #8b949e;
+      margin-bottom: 18px;
+      text-align: center;
+      padding: 0 20px;
+      line-height: 1.6;
+    }
+    .mode-section {
+      width: 100%;
+      padding: 0 20px;
+      margin-bottom: 14px;
+    }
+    .mode-section label {
+      font-size: 12px;
+      color: #8b949e;
+      display: block;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .mode-btns {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+    }
+    .mode-btn {
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: bold;
+      color: #8b949e;
+      background: rgba(100,255,218,0.08);
+      border: 1px solid rgba(100,255,218,0.2);
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .mode-btn.active {
+      color: #0d1117;
+      background: #64ffda;
+      border-color: #64ffda;
+    }
+    .btn {
+      margin-top: 8px;
+      padding: 13px 40px;
+      font-size: 15px;
+      font-weight: bold;
+      color: #0d1117;
+      background: linear-gradient(90deg, #64ffda, #4fd1c5);
+      border: none;
+      border-radius: 30px;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .btn:active { transform: scale(0.95); }
+    #finalScore {
+      font-size: 40px;
+      color: #64ffda;
+      margin: 12px 0;
+    }
+    .hidden { display: none !important; }
+    #hint {
+      position: absolute;
+      bottom: 7px;
+      left: 0; right: 0;
+      text-align: center;
+      color: #4b5563;
+      font-size: 10px;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="gameContainer">
+    <canvas id="gameCanvas"></canvas>
+    <div id="ui">
+      <div>分数: <span id="score">0</span></div>
+      <div id="modeLabel"></div>
+      <div>最高: <span id="best">0</span></div>
+    </div>
+    <div id="overlay">
+      <h1>重力方块</h1>
+      <p class="subtitle">方块从中央生成<br>倾斜手机 / 方向键控制<br>贴边可滑行，将要碰到才停下</p>
+
+      <div class="mode-section">
+        <label>画布大小</label>
+        <div class="mode-btns" id="sizeGroup">
+          <button class="mode-btn" data-size="10">10×10</button>
+          <button class="mode-btn active" data-size="15">15×15</button>
+          <button class="mode-btn" data-size="20">20×20</button>
+        </div>
+      </div>
+
+      <div class="mode-section">
+        <label>难度</label>
+        <div class="mode-btns" id="diffGroup">
+          <button class="mode-btn active" data-diff="easy">简单</button>
+          <button class="mode-btn" data-diff="normal">普通</button>
+          <button class="mode-btn" data-diff="hard">困难</button>
+        </div>
+      </div>
+
+      <button class="btn" id="startBtn">开始游戏</button>
+    </div>
+    <div id="hint">📱 倾斜手机 / ⌨️ 方向键</div>
+  </div>
+
+  <script>
+    const COLORS = ['#ff6b6b', '#64ffda', '#ffd93d', '#6bcbff', '#c792ea', '#ff9f43'];
+
+    // 角度 → 每格移动间隔(ms)：30度=500ms(2格/s)，15度=1000ms
+    // interval = 15000 / |angle|
+    const MIN_ANGLE = 5;
+
+    // 难度配置：speedMult 越大移动越快
+    const DIFF_CONFIG = {
+      easy:   { label: '简单', speedMult: 0.6 },
+      normal: { label: '普通', speedMult: 1.0 },
+      hard:   { label: '困难', speedMult: 2.0 },
+    };
+
+    const SHAPES = [
+      [[0,0],[1,0],[0,1],[1,1]],          // 方形2x2
+      [[0,0],[1,0],[2,0]],                // 横条3
+      [[0,0],[0,1],[0,2]],                // 竖条3
+      [[0,0],[0,1],[1,1]],                // L
+      [[1,0],[1,1],[0,1]],                // 反L
+      [[0,0],[1,0],[2,0],[1,1]],          // T
+      [[0,0],[1,0],[1,1],[2,1]],          // Z
+      [[0,0]],                            // 单格（仅10x10模式）
+    ];
+
+    // ============== 状态 ==============
+    let canvas, ctx;
+    let COLS, ROWS, CELL;
+    let grid = [];
+    let piece = null;
+    let score = 0;
+    let best = parseInt(localStorage.getItem('grav_best') || '0');
+    let gameState = 'idle';
+    let tiltX = 0;
+    let tiltY = 0;
+    let moveAccX = 0;
+    let moveAccY = 0;
+    let lastTime = 0;
+    let selectedSize = 15;
+    let selectedDiff = 'easy';
+
+    // ============== 初始化 ==============
+    function init() {
+      canvas = document.getElementById('gameCanvas');
+      ctx = canvas.getContext('2d');
+      document.getElementById('best').textContent = best;
+
+      // 模式按钮
+      document.querySelectorAll('#sizeGroup .mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#sizeGroup .mode-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          selectedSize = parseInt(btn.dataset.size);
+        });
+      });
+      document.querySelectorAll('#diffGroup .mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#diffGroup .mode-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          selectedDiff = btn.dataset.diff;
+        });
+      });
+
+      document.getElementById('startBtn').addEventListener('click', startGame);
+      document.getElementById('startBtn').addEventListener('touchend', e => { e.preventDefault(); startGame(); });
+
+      // 键盘
+      document.addEventListener('keydown', e => {
+        if (e.key === 'ArrowLeft')  { tiltX = -30; e.preventDefault(); }
+        if (e.key === 'ArrowRight') { tiltX =  30; e.preventDefault(); }
+        if (e.key === 'ArrowUp')    { tiltY = -30; e.preventDefault(); }
+        if (e.key === 'ArrowDown')  { tiltY =  30; e.preventDefault(); }
+      });
+      document.addEventListener('keyup', e => {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') tiltX = 0;
+        if (e.key === 'ArrowUp'   || e.key === 'ArrowDown')  tiltY = 0;
+      });
+
+      // 陀螺仪
+      if (window.DeviceOrientationEvent) {
+        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+          document.body.addEventListener('touchend', async () => {
+            const perm = await DeviceOrientationEvent.requestPermission().catch(() => 'denied');
+            if (perm === 'granted') window.addEventListener('deviceorientation', onOrient);
+          }, { once: true });
+        } else {
+          window.addEventListener('deviceorientation', onOrient);
+        }
+      }
+
+      renderIdle();
+    }
+
+    function onOrient(e) {
+      if (gameState !== 'playing') return;
+      tiltX = e.gamma || 0;
+      tiltY = e.beta  || 0;
+    }
+
+    function renderIdle() {
+      // 根据窗口大小适配
+      const maxW = Math.min(window.innerWidth - 20, 420);
+      const maxH = Math.min(window.innerHeight - 120, 560);
+      COLS = selectedSize;
+      ROWS = selectedSize;
+      CELL = Math.floor(Math.min(maxW / COLS, maxH / ROWS));
+      canvas.width  = COLS * CELL;
+      canvas.height = ROWS * CELL;
+      document.getElementById('gameContainer').style.width  = canvas.width  + 'px';
+      document.getElementById('gameContainer').style.height = canvas.height + 'px';
+      ctx.fillStyle = '#0d1117';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // ============== 开始 ==============
+    function startGame() {
+      const maxW = Math.min(window.innerWidth - 20, 420);
+      const maxH = Math.min(window.innerHeight - 80, 600);
+      COLS = selectedSize;
+      ROWS = selectedSize;
+      CELL = Math.floor(Math.min(maxW / COLS, maxH / ROWS));
+      canvas.width  = COLS * CELL;
+      canvas.height = ROWS * CELL;
+      document.getElementById('gameContainer').style.width  = canvas.width  + 'px';
+      document.getElementById('gameContainer').style.height = canvas.height + 'px';
+
+      document.getElementById('overlay').classList.add('hidden');
+      document.getElementById('modeLabel').textContent = `${COLS}×${ROWS} · ${DIFF_CONFIG[selectedDiff].label}`;
+
+      grid = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+      score = 0;
+      tiltX = 0; tiltY = 0;
+      moveAccX = 0; moveAccY = 0;
+      document.getElementById('score').textContent = 0;
+      gameState = 'playing';
+      spawnPiece();
+      lastTime = performance.now();
+      requestAnimationFrame(loop);
+    }
+
+    // ============== 生成方块 ==============
+    function spawnPiece() {
+      // 10x10模式使用更小的形状（最大3格）
+      let shapePool = COLS <= 10
+        ? SHAPES.filter(s => s.length <= 3)
+        : SHAPES.filter(s => s.length > 1);
+
+      const shape = shapePool[Math.floor(Math.random() * shapePool.length)];
+      const color = Math.floor(Math.random() * COLORS.length);
+
+      // 计算形状偏移使其居中生成
+      const maxPx = Math.max(...shape.map(([x]) => x));
+      const maxPy = Math.max(...shape.map(([, y]) => y));
+      const cx = Math.floor((COLS - maxPx - 1) / 2);
+      const cy = Math.floor((ROWS - maxPy - 1) / 2);
+
+      piece = { x: cx, y: cy, color, shape };
+
+      if (overlapsGrid(piece.x, piece.y, piece.shape)) {
+        gameOver();
+      }
+    }
+
+    // ============== 主循环 ==============
+    function loop(ts) {
+      if (gameState !== 'playing') return;
+      const dt = Math.min(ts - lastTime, 100);
+      lastTime = ts;
+      update(dt);
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    // ============== 更新（核心：下一步碰才停）==============
+    function update(dt) {
+      if (!piece) return;
+
+      const speedMult = DIFF_CONFIG[selectedDiff].speedMult;
+
+      // X方向
+      if (Math.abs(tiltX) >= MIN_ANGLE) {
+        const interval = (15000 / Math.abs(tiltX)) / speedMult;
+        moveAccX += dt;
+        while (moveAccX >= interval) {
+          moveAccX -= interval;
+          const dx = tiltX < 0 ? -1 : 1;
+          const nx = piece.x + dx;
+          // 下一格是否可以移动（不出界、不碰物）
+          if (!outOfBounds(nx, piece.y, piece.shape) && !overlapsGrid(nx, piece.y, piece.shape)) {
+            piece.x = nx;
+          }
+          // 如果下一格就已经是停止条件（无法继续该方向），则停下
+          // 注意：不需要额外处理，方块保持在当前格不动，但不锁定
+        }
+      } else {
+        moveAccX = 0;
+      }
+
+      // Y方向
+      if (Math.abs(tiltY) >= MIN_ANGLE) {
+        const interval = (15000 / Math.abs(tiltY)) / speedMult;
+        moveAccY += dt;
+        while (moveAccY >= interval) {
+          moveAccY -= interval;
+          const dy = tiltY < 0 ? -1 : 1;
+          const ny = piece.y + dy;
+          if (!outOfBounds(piece.x, ny, piece.shape) && !overlapsGrid(piece.x, ny, piece.shape)) {
+            piece.y = ny;
+          }
+        }
+      } else {
+        moveAccY = 0;
+      }
+
+      // 锁定判定：
+      // 当且仅当 倾斜方向的"下一格"是墙/方块 时，才锁定（固定当前方块）
+      if (shouldSettle()) {
+        settlePiece();
+        checkLines();
+        spawnPiece();
+      }
+    }
+
+    // 判定是否需要固定：所有正在倾斜的方向的下一格都被阻挡
+    function shouldSettle() {
+      const hasX = Math.abs(tiltX) >= MIN_ANGLE;
+      const hasY = Math.abs(tiltY) >= MIN_ANGLE;
+
+      // 不倾斜 → 不固定
+      if (!hasX && !hasY) return false;
+
+      let xBlocked = false;
+      let yBlocked = false;
+
+      if (hasX) {
+        const dx = tiltX < 0 ? -1 : 1;
+        const nx = piece.x + dx;
+        xBlocked = outOfBounds(nx, piece.y, piece.shape) || overlapsGrid(nx, piece.y, piece.shape);
+      }
+      if (hasY) {
+        const dy = tiltY < 0 ? -1 : 1;
+        const ny = piece.y + dy;
+        yBlocked = outOfBounds(piece.x, ny, piece.shape) || overlapsGrid(piece.x, ny, piece.shape);
+      }
+
+      // 只有在倾斜的方向被完全阻挡时才固定
+      // 规则：如果同时倾斜X和Y，两个方向都被堵才固定；单方向倾斜时那个方向被堵就固定
+      if (hasX && hasY) return xBlocked && yBlocked;
+      if (hasX) return xBlocked;
+      if (hasY) return yBlocked;
+      return false;
+    }
+
+    // ============== 边界/重叠检查 ==============
+    function outOfBounds(x, y, shape) {
+      for (const [px, py] of shape) {
+        const wx = x + px, wy = y + py;
+        if (wx < 0 || wx >= COLS || wy < 0 || wy >= ROWS) return true;
+      }
+      return false;
+    }
+
+    function overlapsGrid(x, y, shape) {
+      for (const [px, py] of shape) {
+        const wx = x + px, wy = y + py;
+        if (wy >= 0 && wy < ROWS && wx >= 0 && wx < COLS) {
+          if (grid[wy][wx] !== 0) return true;
+        }
+      }
+      return false;
+    }
+
+    // ============== 固定 ==============
+    function settlePiece() {
+      if (!piece) return;
+      const c = piece.color + 1;
+      for (const [px, py] of piece.shape) {
+        const wx = piece.x + px, wy = piece.y + py;
+        if (wx >= 0 && wx < COLS && wy >= 0 && wy < ROWS) {
+          grid[wy][wx] = c;
+        }
+      }
+      piece = null;
+    }
+
+    // ============== 消除行列 ==============
+    function checkLines() {
+      let removed = 0;
+
+      // 检查行
+      for (let y = ROWS - 1; y >= 0; y--) {
+        if (grid[y].every(c => c !== 0)) {
+          grid.splice(y, 1);
+          grid.unshift(new Array(COLS).fill(0));
+          removed++; y++;
+        }
+      }
+
+      // 检查列
+      for (let x = COLS - 1; x >= 0; x--) {
+        let full = true;
+        for (let y = 0; y < ROWS; y++) {
+          if (grid[y][x] === 0) { full = false; break; }
+        }
+        if (full) {
+          for (let y = 0; y < ROWS; y++) {
+            grid[y].splice(x, 1);
+            grid[y].unshift(0);
+          }
+          removed++; x++;
+        }
+      }
+
+      if (removed > 0) {
+        const bonus = [100, 300, 600, 1000, 1500][Math.min(removed - 1, 4)];
+        score += bonus;
+        document.getElementById('score').textContent = score;
+        // 消除闪光效果
+        flashEffect();
+      }
+    }
+
+    function flashEffect() {
+      let count = 0;
+      const t = setInterval(() => {
+        ctx.fillStyle = `rgba(100,255,218,${0.15 - count * 0.03})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (++count >= 5) clearInterval(t);
+      }, 30);
+    }
+
+    // ============== 渲染 ==============
+    function render() {
+      ctx.fillStyle = '#0d1117';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 中心十字虚线
+      ctx.strokeStyle = 'rgba(100,255,218,0.1)';
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(canvas.width / 2, 0);
+      ctx.lineTo(canvas.width / 2, canvas.height);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, canvas.height / 2);
+      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 网格线
+      ctx.strokeStyle = 'rgba(100,255,218,0.05)';
+      for (let i = 0; i <= COLS; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * CELL, 0);
+        ctx.lineTo(i * CELL, canvas.height);
+        ctx.stroke();
+      }
+      for (let i = 0; i <= ROWS; i++) {
+        ctx.beginPath();
+        ctx.moveTo(0, i * CELL);
+        ctx.lineTo(canvas.width, i * CELL);
+        ctx.stroke();
+      }
+
+      // 固定方块
+      for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+          if (grid[y][x]) drawBlock(x, y, COLORS[grid[y][x] - 1]);
+        }
+      }
+
+      // 当前方块 + 边缘预警高亮
+      if (piece) {
+        // 判断是否贴着任何边缘/方块（用于视觉提示）
+        const nearEdge = isNearEdge();
+        for (const [px, py] of piece.shape) {
+          const wx = piece.x + px, wy = piece.y + py;
+          if (wx >= 0 && wx < COLS && wy >= 0 && wy < ROWS) {
+            drawBlock(wx, wy, COLORS[piece.color], 1, nearEdge);
+          }
+        }
+      }
+    }
+
+    // 检查是否紧贴边/方块（当前倾斜方向的下一格）
+    function isNearEdge() {
+      if (!piece) return false;
+      const hasX = Math.abs(tiltX) >= MIN_ANGLE;
+      const hasY = Math.abs(tiltY) >= MIN_ANGLE;
+      if (hasX) {
+        const dx = tiltX < 0 ? -1 : 1;
+        if (outOfBounds(piece.x + dx, piece.y, piece.shape) || overlapsGrid(piece.x + dx, piece.y, piece.shape)) return true;
+      }
+      if (hasY) {
+        const dy = tiltY < 0 ? -1 : 1;
+        if (outOfBounds(piece.x, piece.y + dy, piece.shape) || overlapsGrid(piece.x, piece.y + dy, piece.shape)) return true;
+      }
+      return false;
+    }
+
+    function drawBlock(x, y, color, alpha = 1, glow = false) {
+      ctx.globalAlpha = alpha;
+      if (glow) {
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 10;
+      }
+      ctx.fillStyle = color;
+      ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
+      // 高光
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, Math.max(3, (CELL - 2) / 4));
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+    }
+
+    // ============== 游戏结束 ==============
+    function gameOver() {
+      gameState = 'over';
+      if (score > best) {
+        best = score;
+        localStorage.setItem('grav_best', best);
+        document.getElementById('best').textContent = best;
+      }
+      const ov = document.getElementById('overlay');
+      ov.innerHTML = `
+        <h1>游戏结束</h1>
+        <div id="finalScore">${score}</div>
+        <p class="subtitle">最高分: ${best}</p>
+        <div class="mode-section">
+          <label>画布大小</label>
+          <div class="mode-btns" id="sizeGroup2">
+            <button class="mode-btn ${selectedSize===10?'active':''}" data-size="10">10×10</button>
+            <button class="mode-btn ${selectedSize===15?'active':''}" data-size="15">15×15</button>
+            <button class="mode-btn ${selectedSize===20?'active':''}" data-size="20">20×20</button>
+          </div>
+        </div>
+        <div class="mode-section">
+          <label>难度</label>
+          <div class="mode-btns" id="diffGroup2">
+            <button class="mode-btn ${selectedDiff==='easy'?'active':''}" data-diff="easy">简单</button>
+            <button class="mode-btn ${selectedDiff==='normal'?'active':''}" data-diff="normal">普通</button>
+            <button class="mode-btn ${selectedDiff==='hard'?'active':''}" data-diff="hard">困难</button>
+          </div>
+        </div>
+        <button class="btn" id="restartBtn">再来一局</button>
+      `;
+      ov.classList.remove('hidden');
+      document.querySelectorAll('#sizeGroup2 .mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#sizeGroup2 .mode-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          selectedSize = parseInt(btn.dataset.size);
+        });
+      });
+      document.querySelectorAll('#diffGroup2 .mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#diffGroup2 .mode-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          selectedDiff = btn.dataset.diff;
+        });
+      });
+      document.getElementById('restartBtn').addEventListener('click', startGame);
+      document.getElementById('restartBtn').addEventListener('touchend', e => { e.preventDefault(); startGame(); });
+    }
+
+    window.addEventListener('load', init);
+  </script>
+</body>
+</html>
