@@ -197,6 +197,51 @@
       #infoPanel { min-width: 0; width: 100%; }
       #statsGrid { grid-template-columns: 1fr 1fr; }
     }
+    @media (max-width: 560px) {
+      #frame {
+        width: calc(100vw - 10px);
+        padding: 8px;
+        border-radius: 12px;
+      }
+      #gameContainer {
+        width: 100%;
+      }
+      #overlay {
+        padding: 12px 0 14px;
+      }
+      #overlay h1 {
+        font-size: 24px;
+        margin-bottom: 4px;
+      }
+      #overlay .subtitle {
+        font-size: 11px;
+        margin-bottom: 12px;
+        line-height: 1.45;
+      }
+      .mode-section {
+        padding: 0 12px;
+        margin-bottom: 10px;
+      }
+      .mode-btns {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .mode-btn {
+        flex: 1 1 calc(33.33% - 6px);
+        min-width: 86px;
+        min-height: 36px;
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+      #overlay .btn {
+        width: calc(100% - 24px);
+        margin-left: 12px;
+        margin-right: 12px;
+        min-height: 44px;
+        bottom: 6px;
+      }
+    }
     #gameContainer {
       position: relative;
       border-radius: 12px;
@@ -628,6 +673,8 @@
       shuffle: 100,
     };
     const INVENTORY_SIZE = 4;
+    const SFX_GAIN_MULT = 1.45;
+    const BGM_VOLUME = 0.24;
 
     // ============== 状态 ==============
     let canvas, ctx;
@@ -655,7 +702,7 @@
     let itemUseCount = 0;
     let metricsAcc = 0;
     let startOverlayHTML = '';
-    let soundOn = false;
+    let soundOn = true;
     let vibrateOn = false;
     let audioCtx = null;
     let menuBgm = null;
@@ -704,6 +751,7 @@
       document.body.addEventListener('click', unlockOnce, { once: true });
 
       bindStartOverlay();
+      updateSettingsButtons();
 
       // 键盘
       document.addEventListener('keydown', e => {
@@ -981,7 +1029,8 @@
         osc.connect(gainNode);
       }
       gainNode.connect(ctx.destination);
-      scheduleEnvelope(gainNode, ctx, attack, hold, release, gain);
+      const actualGain = Math.min(0.22, gain * SFX_GAIN_MULT);
+      scheduleEnvelope(gainNode, ctx, attack, hold, release, actualGain);
       osc.start();
       osc.stop(ctx.currentTime + duration + 0.02);
     }
@@ -1003,7 +1052,8 @@
       source.connect(filter);
       filter.connect(gainNode);
       gainNode.connect(ctx.destination);
-      scheduleEnvelope(gainNode, ctx, attack, hold, release, gain);
+      const actualGain = Math.min(0.24, gain * SFX_GAIN_MULT);
+      scheduleEnvelope(gainNode, ctx, attack, hold, release, actualGain);
       source.start();
       source.stop(ctx.currentTime + duration + 0.02);
     }
@@ -1050,13 +1100,13 @@
         menuBgm = new Audio('Assets/Audio/Enum.mp3');
         menuBgm.loop = true;
         menuBgm.preload = 'auto';
-        menuBgm.volume = 0.45;
+        menuBgm.volume = BGM_VOLUME;
       }
       if (!gameBgm) {
         gameBgm = new Audio('Assets/Audio/Main.mp3');
         gameBgm.loop = true;
         gameBgm.preload = 'auto';
-        gameBgm.volume = 0.45;
+        gameBgm.volume = BGM_VOLUME;
       }
     }
 
