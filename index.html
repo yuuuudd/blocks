@@ -805,6 +805,7 @@
     let worldPickups = [];
     let explosions = [];
     let particles = [];
+    let lineFlashes = [];
     let pendingTarget = null;
     let pendingTargetPulseT = 0;
     let audioUnlocked = false;
@@ -828,6 +829,20 @@
       applyKeyboardTilt();
     }
 
+    function shouldSuppressErrorMessage(msg) {
+      const s = String(msg || '').toLowerCase();
+      if (!s) return true;
+      if (s === 'script error.') return true;
+      if (s.includes('resizeobserver')) return true;
+      if (s.includes('passive event listener')) return true;
+      if (s.includes('unable to preventdefault')) return true;
+      if (s.includes('aborterror')) return true;
+      if (s.includes('the operation was aborted')) return true;
+      if (s.includes('networkerror')) return true;
+      if (s.includes('load failed')) return true;
+      return false;
+    }
+
     // ============== 初始化 ==============
     function init() {
       canvas = document.getElementById('gameCanvas');
@@ -836,10 +851,12 @@
       startOverlayHTML = document.getElementById('overlay').innerHTML;
       window.addEventListener('error', e => {
         const msg = (e && e.message) ? String(e.message) : '发生错误';
+        if (shouldSuppressErrorMessage(msg)) return;
         showToast(msg, '#ff6b6b', 1400);
       });
       window.addEventListener('unhandledrejection', e => {
         const msg = (e && e.reason) ? String(e.reason) : '发生错误';
+        if (shouldSuppressErrorMessage(msg)) return;
         showToast(msg, '#ff6b6b', 1400);
       });
       canvas.addEventListener('click', e => {
@@ -1557,8 +1574,13 @@
       canvas.height = ROWS * CELL;
       document.getElementById('gameContainer').style.width  = canvas.width  + 'px';
       document.getElementById('gameContainer').style.height = canvas.height + 'px';
-      ctx.fillStyle = '#0d1117';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      gameMode = selectedMode;
+      if (!grid || grid.length !== ROWS || !grid[0] || grid[0].length !== COLS) {
+        grid = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+      }
+      piece = null;
+      pendingTarget = null;
+      render();
       updateRestartVisibility();
       updateInfoVisibility();
     }
@@ -1566,6 +1588,7 @@
     // ============== 开始 ==============
     function startGame() {
       try {
+        if (soundOn) unlockAudioFromGesture();
         playSfx('start');
         resetKeyboardInput();
         const { maxW, maxH } = getCanvasBounds();
@@ -1611,6 +1634,7 @@
         setPausedUI(false);
         updateItemBar();
         spawnPiece();
+        maybeShowFirstTimeHints();
         lastTime = performance.now();
         syncAudioState();
         requestAnimationFrame(loop);
@@ -1618,6 +1642,19 @@
         showToast(err ? String(err) : '无法开始', '#ff6b6b', 1800);
         throw err;
       }
+    }
+
+    function maybeShowFirstTimeHints() {
+      const key = 'grav_tutorial_v1';
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, '1');
+      const seq = [
+        { t: 0,    text: '新手提示：倾斜手机控制，贴边滑行', color: '#ffd93d' },
+        { t: 1200, text: '红色区域是斩杀线，占到就失败', color: '#ff6b6b' },
+        { t: 2400, text: '道具：点击背包道具 → 再点空格使用', color: '#ffd93d' },
+        { t: 3600, text: '点燃炸弹 3 秒爆，注意闪烁与警告圈', color: '#ff6b6b' },
+      ];
+      for (const it of seq) setTimeout(() => showToast(it.text, it.color, 1100), it.t);
     }
 
     function getCanvasBounds() {
@@ -1688,6 +1725,11 @@
         const ex = explosions[i];
         ex.t += dt;
         if (ex.t >= ex.maxT) explosions.splice(i, 1);
+      }
+      for (let i = lineFlashes.length - 1; i >= 0; i--) {
+        const lf = lineFlashes[i];
+        lf.t += dt;
+        if (lf.t >= lf.maxT) lineFlashes.splice(i, 1);
       }
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
@@ -2390,6 +2432,53 @@
       let removed = 0;
       if (failIfKillZoneOccupied()) return 0;
 
+      function spawnLineFx(rowsToClear, colsToClear) {
+        const maxP = 90;
+        let pCount = 0;
+        for (const y of rowsToClear) {
+          lineFlashes.push({ kind: 'row', index: y, t: 0, maxT: 240, color: 'rgba(100,255,218,1)' });
+          const baseY = (y + 0.5) * CELL;
+          const count = Math.min(26, COLS * 2);
+          for (let i = 0; i < count && pCount < maxP; i++) {
+            const px = (Math.random() * COLS) * CELL;
+            const ang = (Math.random() * Math.PI) - Math.PI / 2;
+            const sp = 0.6 + Math.random() * 2.0;
+            particles.push({
+              x: px,
+              y: baseY,
+              vx: Math.cos(ang) * sp,
+              vy: Math.sin(ang) * sp,
+              life: 380 + Math.random() * 260,
+              t: 0,
+              size: 1.6 + Math.random() * 2.8,
+              color: 'rgba(100,255,218,0.95)',
+            });
+            pCount += 1;
+          }
+        }
+        for (const x of colsToClear) {
+          lineFlashes.push({ kind: 'col', index: x, t: 0, maxT: 240, color: 'rgba(107,203,255,1)' });
+          const baseX = (x + 0.5) * CELL;
+          const count = Math.min(26, ROWS * 2);
+          for (let i = 0; i < count && pCount < maxP; i++) {
+            const py = (Math.random() * ROWS) * CELL;
+            const ang = Math.random() * Math.PI * 2;
+            const sp = 0.6 + Math.random() * 2.0;
+            particles.push({
+              x: baseX,
+              y: py,
+              vx: Math.cos(ang) * sp,
+              vy: Math.sin(ang) * sp,
+              life: 380 + Math.random() * 260,
+              t: 0,
+              size: 1.6 + Math.random() * 2.8,
+              color: 'rgba(107,203,255,0.95)',
+            });
+            pCount += 1;
+          }
+        }
+      }
+
       function rowFull(y) {
         return grid[y].every(c => c !== 0);
       }
@@ -2485,6 +2574,7 @@
         }
 
         if (rowsToClear.length === 0 && colsToClear.length === 0) break;
+        spawnLineFx(rowsToClear, colsToClear);
 
         for (const y of rowsToClear) {
           collectRowItems(y);
@@ -2618,13 +2708,43 @@
       const r = centerRadius();
       const cx = Math.floor((COLS - 1) / 2);
       const cy = Math.floor((ROWS - 1) / 2);
-      ctx.fillStyle = 'rgba(255, 107, 107, 0.08)';
-      for (let y = cy - r; y <= cy + r; y++) {
-        for (let x = cx - r; x <= cx + r; x++) {
-          if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
-          ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
-        }
+      const zx0 = Math.max(0, cx - r) * CELL;
+      const zy0 = Math.max(0, cy - r) * CELL;
+      const zx1 = (Math.min(COLS - 1, cx + r) + 1) * CELL;
+      const zy1 = (Math.min(ROWS - 1, cy + r) + 1) * CELL;
+      const zw = zx1 - zx0;
+      const zh = zy1 - zy0;
+      const zp = 0.55 + 0.45 * Math.sin(now / 260);
+      ctx.save();
+      ctx.fillStyle = `rgba(255, 107, 107, ${0.12 + 0.05 * zp})`;
+      ctx.fillRect(zx0, zy0, zw, zh);
+      ctx.beginPath();
+      ctx.rect(zx0, zy0, zw, zh);
+      ctx.clip();
+      ctx.strokeStyle = `rgba(255, 107, 107, ${0.22 + 0.10 * zp})`;
+      ctx.lineWidth = Math.max(1, CELL * 0.06);
+      const step = Math.max(7, Math.floor(CELL * 0.35));
+      for (let i = -zh; i < zw + zh; i += step) {
+        ctx.beginPath();
+        ctx.moveTo(zx0 + i, zy0);
+        ctx.lineTo(zx0 + i + zh, zy0 + zh);
+        ctx.stroke();
       }
+      ctx.restore();
+      ctx.save();
+      ctx.strokeStyle = `rgba(255, 107, 107, ${0.78 + 0.18 * zp})`;
+      ctx.lineWidth = Math.max(2, CELL * 0.10);
+      ctx.setLineDash([Math.max(6, CELL * 0.45), Math.max(4, CELL * 0.28)]);
+      ctx.strokeRect(zx0 + 1.5, zy0 + 1.5, zw - 3, zh - 3);
+      ctx.setLineDash([]);
+      ctx.shadowColor = 'rgba(255,107,107,0.55)';
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = `rgba(255, 107, 107, ${0.70 + 0.15 * zp})`;
+      ctx.font = `${Math.max(12, Math.floor(CELL * 0.55))}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('斩杀线', zx0 + zw / 2, zy0 + zh / 2);
+      ctx.restore();
 
       // 中心十字虚线
       ctx.strokeStyle = 'rgba(100,255,218,0.1)';
@@ -2662,6 +2782,24 @@
             const meta = decodeCell(grid[y][x]);
             const item = meta.itemTypeId ? getItemById(meta.itemTypeId) : null;
             drawBlock(x, y, COLORS[meta.colorIndex1 - 1], 1, false, item ? item.label : '');
+          }
+        }
+      }
+
+      if (pendingTarget && gameState === 'playing' && gameMode === 'items') {
+        const a = 0.10 + 0.06 * Math.sin((now - pendingTargetPulseT) / 160);
+        ctx.fillStyle = 'rgba(13, 17, 23, 0.35)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        for (let y = 0; y < ROWS; y++) {
+          for (let x = 0; x < COLS; x++) {
+            if (grid[y][x] !== 0) continue;
+            if (isInCenterZone(x, y)) continue;
+            if (isPickupCell(x, y)) continue;
+            ctx.fillStyle = `rgba(255, 217, 61, ${a})`;
+            ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
+            ctx.strokeStyle = `rgba(255, 217, 61, ${0.40 + a})`;
+            ctx.lineWidth = Math.max(1, CELL * 0.06);
+            ctx.strokeRect(x * CELL + 2, y * CELL + 2, CELL - 4, CELL - 4);
           }
         }
       }
@@ -2707,9 +2845,32 @@
       // 当前方块 + 边缘预警高亮
       if (piece) {
         if (piece.isLitBomb) {
-          const remain = Math.max(0, Math.ceil((piece.bombEndsAt - performance.now()) / 1000));
+          const remainMs = Math.max(0, piece.bombEndsAt - now);
+          const remain = Math.max(0, Math.ceil(remainMs / 1000));
           const label = remain > 0 ? `${remain}` : '💣';
-          drawBlock(piece.x, piece.y, '#ff6b6b', 1, true, label);
+          const danger = 1 - Math.min(1, remainMs / LIT_BOMB_MS);
+          const flash = 0.45 + 0.55 * Math.sin(now / (110 - 70 * danger));
+          const alpha = 0.70 + 0.30 * Math.max(0, flash);
+          const cxp = (piece.x + 0.5) * CELL;
+          const cyp = (piece.y + 0.5) * CELL;
+          const ringP = 0.5 + 0.5 * Math.sin(now / 90);
+          const ringR = CELL * (0.78 + 0.42 * ringP + 0.25 * danger);
+          ctx.globalAlpha = 0.85;
+          ctx.strokeStyle = `rgba(255, 107, 107, ${0.40 + 0.45 * danger})`;
+          ctx.lineWidth = Math.max(2, CELL * 0.09);
+          ctx.beginPath();
+          ctx.arc(cxp, cyp, ringR, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = 0.55;
+          ctx.setLineDash([Math.max(6, CELL * 0.35), Math.max(5, CELL * 0.28)]);
+          ctx.strokeStyle = `rgba(255, 107, 107, ${0.25 + 0.40 * danger})`;
+          ctx.lineWidth = Math.max(1, CELL * 0.06);
+          ctx.beginPath();
+          ctx.arc(cxp, cyp, ringR + CELL * 0.35, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
+          drawBlock(piece.x, piece.y, '#ff6b6b', alpha, true, label);
         } else {
         // 判断是否贴着任何边缘/方块（用于视觉提示）
         const nearEdge = isNearEdge();
@@ -2746,18 +2907,35 @@
         const p = Math.min(1, pt.t / pt.life);
         const alpha = (1 - p) * 0.9;
         ctx.globalAlpha = alpha;
-        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.fillStyle = pt.color || 'rgba(255,255,255,0.9)';
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.globalAlpha = 1;
 
-      if (pendingTarget && gameState === 'playing' && gameMode === 'items') {
-        const a = 0.35 + 0.15 * Math.sin((now - pendingTargetPulseT) / 150);
-        ctx.strokeStyle = `rgba(255, 217, 61, ${a})`;
-        ctx.lineWidth = Math.max(2, CELL * 0.06);
-        ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
+      for (const lf of lineFlashes) {
+        const p = Math.min(1, lf.t / lf.maxT);
+        const alpha = (1 - p) * 0.55;
+        ctx.globalAlpha = alpha;
+        if (lf.kind === 'row') {
+          const y = lf.index * CELL;
+          const grd = ctx.createLinearGradient(0, y, 0, y + CELL);
+          grd.addColorStop(0, 'rgba(0,0,0,0)');
+          grd.addColorStop(0.5, lf.color.replace(',1)', ',0.95)'));
+          grd.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = grd;
+          ctx.fillRect(0, y, canvas.width, CELL);
+        } else {
+          const x = lf.index * CELL;
+          const grd = ctx.createLinearGradient(x, 0, x + CELL, 0);
+          grd.addColorStop(0, 'rgba(0,0,0,0)');
+          grd.addColorStop(0.5, lf.color.replace(',1)', ',0.95)'));
+          grd.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = grd;
+          ctx.fillRect(x, 0, CELL, canvas.height);
+        }
+        ctx.globalAlpha = 1;
       }
     }
 
