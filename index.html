@@ -194,8 +194,24 @@
       #layout { flex-direction: column; }
       #frame { height: auto; max-height: none; overflow: visible; }
       body { overflow: auto; }
-      #infoPanel { min-width: 0; width: 100%; }
+      #infoPanel {
+        min-width: 0;
+        width: 100%;
+        padding: 8px;
+        gap: 8px;
+      }
       #statsGrid { grid-template-columns: 1fr 1fr; }
+      #infoTools {
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .chipBtn {
+        flex: 1 1 calc(50% - 6px);
+        text-align: center;
+      }
+      #helpText {
+        font-size: 11px;
+      }
     }
     @media (max-width: 560px) {
       #frame {
@@ -675,6 +691,21 @@
     const INVENTORY_SIZE = 4;
     const SFX_GAIN_MULT = 1.45;
     const BGM_VOLUME = 0.24;
+    const SFX_COOLDOWN_MS = {
+      move: 85,
+      land: 0,
+      clear1: 0,
+      clear2: 0,
+      clear3: 0,
+      clear4: 0,
+      itemCollect: 50,
+      itemUse: 50,
+      gameOver: 0,
+      start: 0,
+      pause: 80,
+      resume: 80,
+      home: 80,
+    };
 
     // ============== 状态 ==============
     let canvas, ctx;
@@ -710,6 +741,7 @@
     let activeBgm = '';
     let audioUnlocked = false;
     let pendingBgmKind = '';
+    let lastSfxAt = {};
 
     // ============== 初始化 ==============
     function init() {
@@ -856,6 +888,7 @@
 
     function togglePause() {
       if (gameState === 'playing') {
+        playSfx('pause');
         gameState = 'paused';
         setPausedUI(true);
         updateRestartVisibility();
@@ -871,6 +904,7 @@
 
     function resumeGame() {
       if (gameState !== 'paused') return;
+      playSfx('resume');
       gameState = 'playing';
       setPausedUI(false);
       updateRestartVisibility();
@@ -882,6 +916,7 @@
     }
 
     function goHome() {
+      playSfx('home');
       const po = document.getElementById('pauseOverlay');
       po.classList.add('hidden');
       gameState = 'idle';
@@ -1060,35 +1095,51 @@
 
     function playSfx(kind) {
       if (!soundOn) return;
+      const now = performance.now();
+      const cooldown = SFX_COOLDOWN_MS[kind] || 0;
+      if (cooldown > 0 && now - (lastSfxAt[kind] || 0) < cooldown) return;
+      lastSfxAt[kind] = now;
       switch (kind) {
         case 'move':
-          playTone({ type: 'square', frequency: 440, duration: 0.05, gain: 0.03, attack: 0.002, hold: 0.012, release: 0.03 });
+          playTone({ type: 'square', frequency: 430, duration: 0.04, gain: 0.018, attack: 0.002, hold: 0.01, release: 0.026 });
           return;
         case 'land':
-          playTone({ type: 'sine', frequency: 110, toFrequency: 78, duration: 0.16, gain: 0.08, attack: 0.002, hold: 0.018, release: 0.11 });
+          playTone({ type: 'sine', frequency: 130, toFrequency: 76, duration: 0.18, gain: 0.11, attack: 0.002, hold: 0.02, release: 0.12 });
           return;
         case 'clear1':
-          playTone({ type: 'sine', frequency: 880, duration: 0.18, gain: 0.05, attack: 0.003, hold: 0.016, release: 0.08 });
+          playTone({ type: 'sine', frequency: 880, duration: 0.2, gain: 0.075, attack: 0.003, hold: 0.018, release: 0.1 });
           return;
         case 'clear2':
-          playTone({ type: 'sine', frequency: 660, toFrequency: 494, duration: 0.22, gain: 0.055, attack: 0.003, hold: 0.02, release: 0.1 });
+          playTone({ type: 'sine', frequency: 660, toFrequency: 494, duration: 0.24, gain: 0.08, attack: 0.003, hold: 0.024, release: 0.11 });
           return;
         case 'clear3':
-          playTone({ type: 'sawtooth', frequency: 42, duration: 0.5, gain: 0.06, attack: 0.004, hold: 0.04, release: 0.18 });
-          playTone({ type: 'sine', frequency: 120, duration: 0.45, gain: 0.02, attack: 0.002, hold: 0.02, release: 0.14 });
+          playTone({ type: 'sawtooth', frequency: 42, duration: 0.54, gain: 0.085, attack: 0.004, hold: 0.045, release: 0.2 });
+          playTone({ type: 'sine', frequency: 120, duration: 0.45, gain: 0.035, attack: 0.002, hold: 0.02, release: 0.14 });
           return;
         case 'clear4':
-          playNoise({ duration: 0.8, gain: 0.06, attack: 0.004, hold: 0.04, release: 0.22, filterFrequency: 2400, filterQ: 0.7, sweepTo: 7200 });
+          playNoise({ duration: 0.85, gain: 0.085, attack: 0.004, hold: 0.045, release: 0.24, filterFrequency: 2400, filterQ: 0.7, sweepTo: 7200 });
           return;
         case 'itemCollect':
-          playTone({ type: 'triangle', frequency: 740, toFrequency: 1040, duration: 0.12, gain: 0.045, attack: 0.003, hold: 0.012, release: 0.06 });
+          playTone({ type: 'triangle', frequency: 740, toFrequency: 1040, duration: 0.13, gain: 0.065, attack: 0.003, hold: 0.014, release: 0.07 });
           return;
         case 'itemUse':
-          playTone({ type: 'square', frequency: 360, duration: 0.08, gain: 0.05, attack: 0.002, hold: 0.01, release: 0.05 });
+          playTone({ type: 'square', frequency: 360, duration: 0.09, gain: 0.072, attack: 0.002, hold: 0.012, release: 0.06 });
           return;
         case 'gameOver':
-          playTone({ type: 'sine', frequency: 180, toFrequency: 60, duration: 0.9, gain: 0.08, attack: 0.004, hold: 0.02, release: 0.28 });
-          playNoise({ duration: 0.6, gain: 0.025, attack: 0.004, hold: 0.02, release: 0.15, filterFrequency: 900, filterQ: 0.8, sweepTo: 180 });
+          playTone({ type: 'sine', frequency: 180, toFrequency: 60, duration: 0.9, gain: 0.1, attack: 0.004, hold: 0.02, release: 0.28 });
+          playNoise({ duration: 0.6, gain: 0.04, attack: 0.004, hold: 0.02, release: 0.15, filterFrequency: 900, filterQ: 0.8, sweepTo: 180 });
+          return;
+        case 'start':
+          playTone({ type: 'triangle', frequency: 392, toFrequency: 784, duration: 0.14, gain: 0.07, attack: 0.003, hold: 0.01, release: 0.06 });
+          return;
+        case 'pause':
+          playTone({ type: 'sine', frequency: 520, toFrequency: 420, duration: 0.1, gain: 0.055, attack: 0.003, hold: 0.01, release: 0.05 });
+          return;
+        case 'resume':
+          playTone({ type: 'sine', frequency: 420, toFrequency: 560, duration: 0.1, gain: 0.055, attack: 0.003, hold: 0.01, release: 0.05 });
+          return;
+        case 'home':
+          playTone({ type: 'sine', frequency: 460, duration: 0.09, gain: 0.05, attack: 0.003, hold: 0.01, release: 0.05 });
           return;
         default:
           return;
@@ -1285,6 +1336,7 @@
 
     // ============== 开始 ==============
     function startGame() {
+      playSfx('start');
       const { maxW, maxH } = getCanvasBounds();
       COLS = selectedSize;
       ROWS = selectedSize;
@@ -1329,7 +1381,11 @@
 
     function getCanvasBounds() {
       const base = 560;
-      const maxPx = Math.max(280, Math.min(base, window.innerWidth - 40, window.innerHeight - 120));
+      let maxPx = Math.max(280, Math.min(base, window.innerWidth - 40, window.innerHeight - 120));
+      if (window.innerWidth <= 760) {
+        const reserved = gameState === 'playing' ? 300 : 180;
+        maxPx = Math.max(240, Math.min(base, window.innerWidth - 20, window.innerHeight - reserved));
+      }
       return { maxW: maxPx, maxH: maxPx };
     }
 
@@ -1864,6 +1920,7 @@
         if (clearsEl) clearsEl.textContent = `${clears}`;
         const bonus = [100, 300, 600, 1000, 1500][Math.min(removed - 1, 4)];
         addScorePart('clear', bonus, '', '#64ffda', true);
+        vibrate([12, 20, 12]);
         if (removed === 1) playSfx('clear1');
         else if (removed === 2) playSfx('clear2');
         else if (removed === 3) playSfx('clear3');
