@@ -684,7 +684,7 @@
     const MIN_ANGLE = 2;
     const MAX_ANGLE = 75;
     const MAX_SPEED_CELLS_PER_SEC = 5;
-    const TILT_DEADZONE = 2;
+    const TILT_DEADZONE = 5;
     const MOVE_CURVE_EXP = 1.6;
     const MOVE_SMOOTH_MS = 80;
     const SETTLE_DELAY_MS = 180;
@@ -1015,6 +1015,8 @@
       }
 
       renderIdle();
+      ensureBgmTracks();
+      if (!bgmPrimed) primeBgmTracks();
       syncAudioState();
 
       // 自动播放补偿：移动端预览页常在初次加载时拦截，页面可见后再尝试一次
@@ -1528,29 +1530,42 @@
       if (!soundOn) return;
       if (!audioUnlocked) audioUnlocked = true;
 
+      const retryMutedAutoplay = () => {
+        const prevMuted = next.muted;
+        next.muted = true;
+        try { next.currentTime = 0; } catch (_) {}
+        const mutedPlay = next.play();
+        if (!mutedPlay || typeof mutedPlay.then !== 'function') {
+          setTimeout(() => {
+            next.muted = prevMuted;
+            if (!next.paused) {
+              next.volume = BGM_VOLUME;
+              pendingBgmKind = '';
+            }
+          }, 140);
+          return;
+        }
+        mutedPlay.then(() => {
+          next.muted = prevMuted;
+          next.volume = BGM_VOLUME;
+          pendingBgmKind = '';
+        }).catch(() => {
+          next.muted = prevMuted;
+        });
+      };
+
       const tryPlay = () => {
         if (!next.paused) return;
         try { next.currentTime = 0; } catch (_) {}
         const p = next.play();
-        if (!p || typeof p.catch !== 'function') return;
+        if (!p || typeof p.catch !== 'function') {
+          setTimeout(() => {
+            if (next.paused) retryMutedAutoplay();
+          }, 120);
+          return;
+        }
         p.catch(() => {
           pendingBgmKind = kind;
-          const retryMutedAutoplay = () => {
-            const prevMuted = next.muted;
-            next.muted = true;
-            const mutedPlay = next.play();
-            if (!mutedPlay || typeof mutedPlay.then !== 'function') {
-              next.muted = prevMuted;
-              return;
-            }
-            mutedPlay.then(() => {
-              next.muted = prevMuted;
-              next.volume = BGM_VOLUME;
-              pendingBgmKind = '';
-            }).catch(() => {
-              next.muted = prevMuted;
-            });
-          };
           next.addEventListener('canplaythrough', () => {
             if (!soundOn) return;
             if (pendingBgmKind && pendingBgmKind !== kind) return;
@@ -2072,9 +2087,10 @@
       const xBlocked = hasX ? (outOfBounds(piece.x + dx, piece.y, piece.shape) || overlapsGrid(piece.x + dx, piece.y, piece.shape)) : false;
       const yBlocked = hasY ? (outOfBounds(piece.x, piece.y + dy, piece.shape) || overlapsGrid(piece.x, piece.y + dy, piece.shape)) : false;
 
-      const settleCond = primary === 'x'
-        ? (hasX && xBlocked && (!hasY || yBlocked))
-        : (hasY && yBlocked && (!hasX || xBlocked));
+      // 按主倾斜轴判定固定，避免手机双轴微抖导致“贴边不落地”。
+      let settleCond = false;
+      if (primary === 'x') settleCond = hasX ? xBlocked : (hasY && yBlocked);
+      else settleCond = hasY ? yBlocked : (hasX && xBlocked);
 
       if (!settleCond) {
         piece.blockedMs = 0;
