@@ -778,6 +778,7 @@
     let gameState = 'idle';
     let tiltX = 0;
     let tiltY = 0;
+    const keyState = { left: false, right: false, up: false, down: false };
     let moveAccX = 0;
     let moveAccY = 0;
     let lastTime = 0;
@@ -814,13 +815,39 @@
     let sensorPermissionState = 'unknown';
     let lastGameOverReason = '';
 
+    function applyKeyboardTilt() {
+      tiltX = (keyState.left ? -KEYBOARD_TILT_ANGLE : 0) + (keyState.right ? KEYBOARD_TILT_ANGLE : 0);
+      tiltY = (keyState.up ? -KEYBOARD_TILT_ANGLE : 0) + (keyState.down ? KEYBOARD_TILT_ANGLE : 0);
+    }
+
+    function resetKeyboardInput() {
+      keyState.left = false;
+      keyState.right = false;
+      keyState.up = false;
+      keyState.down = false;
+      applyKeyboardTilt();
+    }
+
     // ============== 初始化 ==============
     function init() {
       canvas = document.getElementById('gameCanvas');
       ctx = canvas.getContext('2d');
       document.getElementById('best').textContent = best;
       startOverlayHTML = document.getElementById('overlay').innerHTML;
+      window.addEventListener('error', e => {
+        const msg = (e && e.message) ? String(e.message) : '发生错误';
+        showToast(msg, '#ff6b6b', 1400);
+      });
+      window.addEventListener('unhandledrejection', e => {
+        const msg = (e && e.reason) ? String(e.reason) : '发生错误';
+        showToast(msg, '#ff6b6b', 1400);
+      });
       canvas.addEventListener('click', e => {
+        if (gameState === 'dead') {
+          document.getElementById('deadOverlay').classList.remove('hidden');
+          e.preventDefault();
+          return;
+        }
         if (!pendingTarget) return;
         const rect = canvas.getBoundingClientRect();
         const x = Math.floor((e.clientX - rect.left) / CELL);
@@ -829,6 +856,11 @@
         e.preventDefault();
       });
       canvas.addEventListener('touchend', e => {
+        if (gameState === 'dead') {
+          document.getElementById('deadOverlay').classList.remove('hidden');
+          e.preventDefault();
+          return;
+        }
         if (!pendingTarget) return;
         const t = e.changedTouches && e.changedTouches[0];
         if (!t) return;
@@ -837,6 +869,20 @@
         const y = Math.floor((t.clientY - rect.top) / CELL);
         usePendingItemAtCell(x, y);
         e.preventDefault();
+      }, { passive: false });
+
+      const overlay = document.getElementById('overlay');
+      overlay.addEventListener('click', e => {
+        const t = e.target;
+        if (!t || !t.id) return;
+        if (t.id === 'startBtn') { startGame(); e.preventDefault(); return; }
+        if (t.id === 'sensorPermBtn') { requestSensorPermission(); e.preventDefault(); return; }
+      });
+      overlay.addEventListener('touchend', e => {
+        const t = e.target;
+        if (!t || !t.id) return;
+        if (t.id === 'startBtn') { startGame(); e.preventDefault(); return; }
+        if (t.id === 'sensorPermBtn') { requestSensorPermission(); e.preventDefault(); return; }
       }, { passive: false });
       document.getElementById('restartNowBtn').addEventListener('click', startGame);
       document.getElementById('restartNowBtn').addEventListener('touchend', e => { e.preventDefault(); startGame(); });
@@ -869,13 +915,11 @@
       document.getElementById('deadHomeBtn').addEventListener('click', goHome);
       document.getElementById('deadHomeBtn').addEventListener('touchend', e => { e.preventDefault(); goHome(); });
       document.getElementById('deadCloseBtn').addEventListener('click', () => {
-        document.getElementById('overlay').classList.add('hidden');
-        document.getElementById('deadOverlay').classList.remove('hidden');
+        document.getElementById('deadOverlay').classList.add('hidden');
       });
       document.getElementById('deadCloseBtn').addEventListener('touchend', e => {
         e.preventDefault();
-        document.getElementById('overlay').classList.add('hidden');
-        document.getElementById('deadOverlay').classList.remove('hidden');
+        document.getElementById('deadOverlay').classList.add('hidden');
       });
       document.getElementById('ruleBtn').addEventListener('click', toggleRulesPanel);
       document.getElementById('ruleBtn').addEventListener('touchend', e => { e.preventDefault(); toggleRulesPanel(); });
@@ -907,8 +951,10 @@
         if (e.key === 'ArrowDown')  { keyState.down = true;  applyKeyboardTilt(); e.preventDefault(); }
       });
       document.addEventListener('keyup', e => {
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') tiltX = 0;
-        if (e.key === 'ArrowUp'   || e.key === 'ArrowDown')  tiltY = 0;
+        if (e.key === 'ArrowLeft')  { keyState.left = false;  applyKeyboardTilt(); }
+        if (e.key === 'ArrowRight') { keyState.right = false; applyKeyboardTilt(); }
+        if (e.key === 'ArrowUp')    { keyState.up = false;    applyKeyboardTilt(); }
+        if (e.key === 'ArrowDown')  { keyState.down = false;  applyKeyboardTilt(); }
       });
 
       if (window.PointerEvent) {
@@ -931,22 +977,9 @@
       } else {
         initSensorPermissionState();
       }
-    }
 
-    async function requestOrientationPermission() {
-      if (!window.DeviceOrientationEvent) return;
-      if (orientationListening) return;
-      if (typeof DeviceOrientationEvent.requestPermission !== 'function') {
-        setupOrientationAccess();
-        return;
-      }
-      const perm = await DeviceOrientationEvent.requestPermission().catch(() => 'denied');
-      if (perm === 'granted') {
-        window.addEventListener('deviceorientation', onOrient);
-        orientationListening = true;
-      } else {
-        showToast('陀螺仪未授权，可再次点击开始重试', '#ffd93d', 1200);
-      }
+      renderIdle();
+      syncAudioState();
     }
 
     function bindStartOverlay() {
@@ -954,8 +987,6 @@
       const modeGroup = ov.querySelector('#modeGroup');
       const sizeGroup = ov.querySelector('#sizeGroup');
       const diffGroup = ov.querySelector('#diffGroup');
-      const startBtn = ov.querySelector('#startBtn');
-      const sensorBtn = ov.querySelector('#sensorPermBtn');
 
       if (modeGroup) {
         modeGroup.querySelectorAll('.mode-btn').forEach(btn => {
@@ -986,14 +1017,6 @@
             selectedDiff = btn.dataset.diff;
           });
         });
-      }
-      if (startBtn) {
-        startBtn.addEventListener('click', startGame);
-        startBtn.addEventListener('touchend', e => { e.preventDefault(); startGame(); });
-      }
-      if (sensorBtn) {
-        sensorBtn.addEventListener('click', requestSensorPermission);
-        sensorBtn.addEventListener('touchend', e => { e.preventDefault(); requestSensorPermission(); });
       }
       updateSensorPermissionUI(ov);
     }
@@ -1122,6 +1145,8 @@
       resetKeyboardInput();
       const po = document.getElementById('pauseOverlay');
       po.classList.add('hidden');
+      document.getElementById('deadOverlay').classList.add('hidden');
+      document.getElementById('pauseSettingsRow').classList.add('hidden');
       gameState = 'idle';
       piece = null;
       inventory = [];
@@ -1145,7 +1170,7 @@
       el.classList.toggle('hidden');
       if (!el.classList.contains('hidden')) {
         el.innerHTML = `
-中心禁区：中心 3×3（10×10 为 1×1），占到就结束。<br>
+斩杀线：10×10 为中心 3×3 · 15×15 为 5×5 · 20×20 为 7×7，占到就结束。<br>
 均衡奖励：每放置 3 个方块检测一次，四边占领更均衡会额外加分。<br>
 道具模式：消除带字母格子获得道具；1-4 或点击道具槽使用。<br>
 得分倍率：简单 x${DIFF_CONFIG.easy.scoreMult} · 普通 x${DIFF_CONFIG.normal.scoreMult} · 困难 x${DIFF_CONFIG.hard.scoreMult}
@@ -1540,59 +1565,63 @@
 
     // ============== 开始 ==============
     function startGame() {
-      playSfx('start');
-      requestOrientationPermission();
-      resetKeyboardInput();
-      const { maxW, maxH } = getCanvasBounds();
-      COLS = selectedSize;
-      ROWS = selectedSize;
-      CELL = Math.floor(Math.min(maxW / COLS, maxH / ROWS));
-      canvas.width  = COLS * CELL;
-      canvas.height = ROWS * CELL;
-      document.getElementById('gameContainer').style.width  = canvas.width  + 'px';
-      document.getElementById('gameContainer').style.height = canvas.height + 'px';
+      try {
+        playSfx('start');
+        resetKeyboardInput();
+        const { maxW, maxH } = getCanvasBounds();
+        COLS = selectedSize;
+        ROWS = selectedSize;
+        CELL = Math.floor(Math.min(maxW / COLS, maxH / ROWS));
+        canvas.width  = COLS * CELL;
+        canvas.height = ROWS * CELL;
+        document.getElementById('gameContainer').style.width  = canvas.width  + 'px';
+        document.getElementById('gameContainer').style.height = canvas.height + 'px';
 
-      document.getElementById('overlay').classList.add('hidden');
-      document.getElementById('deadOverlay').classList.add('hidden');
-      document.getElementById('pauseSettingsRow').classList.add('hidden');
-      gameMode = selectedMode;
-      document.getElementById('modeLabel').textContent = `${COLS}×${ROWS} · ${GAME_MODE[gameMode].label} · ${DIFF_CONFIG[selectedDiff].label}`;
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('deadOverlay').classList.add('hidden');
+        document.getElementById('pauseSettingsRow').classList.add('hidden');
+        gameMode = selectedMode;
+        document.getElementById('modeLabel').textContent = `${COLS}×${ROWS} · ${GAME_MODE[gameMode].label} · ${DIFF_CONFIG[selectedDiff].label}`;
 
-      grid = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
-      score = 0;
-      tiltX = 0; tiltY = 0;
-      moveAccX = 0; moveAccY = 0;
-      piecePlaced = 0;
-      inventory = [];
-      clears = 0;
-      maxFill = 0;
-      itemUseCount = 0;
-      metricsAcc = 0;
-      currentFillPct = 0;
-      worldPickups = [];
-      explosions = [];
-      particles = [];
-      scoreParts = { placement: 0, clear: 0, balance: 0, itemCollect: 0, itemUse: 0 };
-      document.getElementById('score').textContent = 0;
-      const clearsEl = document.getElementById('clears');
-      if (clearsEl) clearsEl.textContent = '0';
-      const fillEl = document.getElementById('fill');
-      if (fillEl) fillEl.textContent = '0%';
-      gameState = 'playing';
-      updateRestartVisibility();
-      updateInfoVisibility();
-      updatePauseVisibility();
-      updateSettingsButtons();
-      setPausedUI(false);
-      updateItemBar();
-      spawnPiece();
-      lastTime = performance.now();
-      syncAudioState();
-      requestAnimationFrame(loop);
+        grid = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+        score = 0;
+        tiltX = 0; tiltY = 0;
+        moveAccX = 0; moveAccY = 0;
+        piecePlaced = 0;
+        inventory = [];
+        clears = 0;
+        maxFill = 0;
+        itemUseCount = 0;
+        metricsAcc = 0;
+        currentFillPct = 0;
+        worldPickups = [];
+        explosions = [];
+        particles = [];
+        scoreParts = { placement: 0, clear: 0, balance: 0, itemCollect: 0, itemUse: 0 };
+        document.getElementById('score').textContent = 0;
+        const clearsEl = document.getElementById('clears');
+        if (clearsEl) clearsEl.textContent = '0';
+        const fillEl = document.getElementById('fill');
+        if (fillEl) fillEl.textContent = '0%';
+        gameState = 'playing';
+        updateRestartVisibility();
+        updateInfoVisibility();
+        updatePauseVisibility();
+        updateSettingsButtons();
+        setPausedUI(false);
+        updateItemBar();
+        spawnPiece();
+        lastTime = performance.now();
+        syncAudioState();
+        requestAnimationFrame(loop);
+      } catch (err) {
+        showToast(err ? String(err) : '无法开始', '#ff6b6b', 1800);
+        throw err;
+      }
     }
 
     function getCanvasBounds() {
-      const base = 560;
+      const base = 680;
       let maxPx = Math.max(280, Math.min(base, window.innerWidth - 40, window.innerHeight - 120));
       if (window.innerWidth <= 760) {
         const reserved = gameState === 'playing' ? 300 : 180;
@@ -2196,7 +2225,7 @@
         return false;
       }
       if (isInCenterZone(x, y)) {
-        showToast('中心禁区不可用', '#ff6b6b', 700);
+        showToast('斩杀线不可用', '#ff6b6b', 700);
         return false;
       }
 
@@ -2342,7 +2371,7 @@
         const wx = piece.x + px, wy = piece.y + py;
         if (wx >= 0 && wx < COLS && wy >= 0 && wy < ROWS) {
           if (isInCenterZone(wx, wy)) {
-            gameOver('中心被占');
+            gameOver('斩杀线被占');
             return;
           }
           const itemTypeId = (gameMode === 'items' && piece.itemTypeId && i === piece.itemIndex) ? piece.itemTypeId : 0;
@@ -2359,6 +2388,7 @@
     // ============== 消除行列 ==============
     function checkLines() {
       let removed = 0;
+      if (failIfKillZoneOccupied()) return 0;
 
       function rowFull(y) {
         return grid[y].every(c => c !== 0);
@@ -2471,6 +2501,7 @@
 
         const stepCount = rowsToClear.length + colsToClear.length;
         removed += stepCount;
+        if (failIfKillZoneOccupied()) return removed;
       }
 
       if (removed > 0) {
@@ -2772,22 +2803,43 @@
 
     // ============== 游戏结束 ==============
     function gameOver(reason = '') {
-      gameState = 'over';
+      if (gameState === 'dead') return;
+      lastGameOverReason = reason || '';
+      gameState = 'dead';
       playSfx('gameOver');
       updateRestartVisibility();
       updateInfoVisibility();
       updatePauseVisibility();
       setPausedUI(false);
+      pendingTarget = null;
       if (score > best) {
         best = score;
         localStorage.setItem('grav_best', best);
         document.getElementById('best').textContent = best;
       }
+      updateItemBar();
+      const po = document.getElementById('pauseOverlay');
+      po.classList.add('hidden');
       const ov = document.getElementById('overlay');
-      const reasonHtml = reason ? `<p class="subtitle">${reason}</p>` : '';
+      ov.classList.add('hidden');
+      const d = document.getElementById('deadOverlay');
+      const reasonEl = document.getElementById('deadReason');
+      if (reasonEl) reasonEl.textContent = lastGameOverReason ? `原因：${lastGameOverReason}` : '';
+      d.classList.remove('hidden');
+      syncAudioState();
+    }
+
+    function showResultOverlay() {
+      if (gameState !== 'dead') return;
+      const ov = document.getElementById('overlay');
       const mult = DIFF_CONFIG[selectedDiff].scoreMult || 1.0;
       const parts = scoreParts || {};
-      const summary = `
+      const reasonHtml = lastGameOverReason ? `<p class="subtitle">${lastGameOverReason}</p>` : '';
+      ov.innerHTML = `
+        <h1>结果</h1>
+        <div id="finalScore">${score}</div>
+        <p class="subtitle">最高分: ${best}</p>
+        ${reasonHtml}
         <div class="mode-section">
           <label>得分组成 (倍率 x${mult})</label>
           <p class="subtitle" style="margin-bottom:10px;">
@@ -2796,64 +2848,22 @@
             消除总数: ${clears} · 最高充满: ${maxFill}% · 道具使用次数: ${itemUseCount}
           </p>
         </div>
-      `;
-      ov.innerHTML = `
-        <h1>游戏结束</h1>
-        <div id="finalScore">${score}</div>
-        <p class="subtitle">最高分: ${best}</p>
-        ${reasonHtml}
-        ${summary}
-        <div class="mode-section">
-          <label>模式</label>
-          <div class="mode-btns" id="modeGroup2">
-            <button class="mode-btn ${selectedMode==='normal'?'active':''}" data-mode="normal">普通</button>
-            <button class="mode-btn ${selectedMode==='items'?'active':''}" data-mode="items">道具</button>
-          </div>
-        </div>
-        <div class="mode-section">
-          <label>画布大小</label>
-          <div class="mode-btns" id="sizeGroup2">
-            <button class="mode-btn ${selectedSize===10?'active':''}" data-size="10">10×10</button>
-            <button class="mode-btn ${selectedSize===15?'active':''}" data-size="15">15×15</button>
-            <button class="mode-btn ${selectedSize===20?'active':''}" data-size="20">20×20</button>
-          </div>
-        </div>
-        <div class="mode-section">
-          <label>难度</label>
-          <div class="mode-btns" id="diffGroup2">
-            <button class="mode-btn ${selectedDiff==='easy'?'active':''}" data-diff="easy">简单</button>
-            <button class="mode-btn ${selectedDiff==='normal'?'active':''}" data-diff="normal">普通</button>
-            <button class="mode-btn ${selectedDiff==='hard'?'active':''}" data-diff="hard">困难</button>
-          </div>
-        </div>
-        <button class="btn" id="restartBtn">再来一局</button>
-      `;
+        <button class="btn" id="closeResultBtn">关闭结果</button>
+      `.trim();
+      const closeBtn = ov.querySelector('#closeResultBtn');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          ov.classList.add('hidden');
+          document.getElementById('deadOverlay').classList.remove('hidden');
+        });
+        closeBtn.addEventListener('touchend', e => {
+          e.preventDefault();
+          ov.classList.add('hidden');
+          document.getElementById('deadOverlay').classList.remove('hidden');
+        });
+      }
+      document.getElementById('deadOverlay').classList.add('hidden');
       ov.classList.remove('hidden');
-      syncAudioState();
-      updateItemBar();
-      document.querySelectorAll('#modeGroup2 .mode-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          document.querySelectorAll('#modeGroup2 .mode-btn').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          selectedMode = btn.dataset.mode;
-        });
-      });
-      document.querySelectorAll('#sizeGroup2 .mode-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          document.querySelectorAll('#sizeGroup2 .mode-btn').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          selectedSize = parseInt(btn.dataset.size);
-        });
-      });
-      document.querySelectorAll('#diffGroup2 .mode-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          document.querySelectorAll('#diffGroup2 .mode-btn').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          selectedDiff = btn.dataset.diff;
-        });
-      });
-      document.getElementById('restartBtn').addEventListener('click', startGame);
-      document.getElementById('restartBtn').addEventListener('touchend', e => { e.preventDefault(); startGame(); });
     }
 
     window.addEventListener('load', init);
