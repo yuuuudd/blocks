@@ -978,9 +978,9 @@
       document.getElementById('vibrateBtn').addEventListener('touchend', e => { e.preventDefault(); toggleVibrate(); });
 
       const unlockOnce = () => unlockAudioFromGesture();
-      document.body.addEventListener('touchstart', unlockOnce, { once: true, passive: true });
-      document.body.addEventListener('pointerdown', unlockOnce, { once: true });
-      document.body.addEventListener('click', unlockOnce, { once: true });
+      document.body.addEventListener('touchstart', unlockOnce, { passive: true });
+      document.body.addEventListener('pointerdown', unlockOnce);
+      document.body.addEventListener('click', unlockOnce);
 
       bindStartOverlay();
       updateSettingsButtons();
@@ -1281,14 +1281,11 @@
     }
 
     function unlockAudioFromGesture() {
-      if (audioUnlocked) return;
-      audioUnlocked = true;
+      if (!audioUnlocked) audioUnlocked = true;
       ensureBgmTracks();
       ensureAudioRunning();
       if (!soundOn) return;
-      const kind = pendingBgmKind || (gameState === 'playing' ? 'game' : gameState === 'dead' ? 'death' : 'menu');
-      pendingBgmKind = '';
-      playBgm(kind);
+      syncAudioState();
     }
 
     function createNoiseBuffer(ctx, duration = 0.2) {
@@ -1456,12 +1453,31 @@
         pendingBgmKind = kind;
         return;
       }
+
+      const tryPlay = () => {
+        if (!next.paused) return;
+        next.currentTime = 0;
+        const p = next.play();
+        if (!p || typeof p.catch !== 'function') return;
+        p.catch(() => {
+          pendingBgmKind = kind;
+          const ctx = ensureAudioContext();
+          if (!ctx) return;
+          if (ctx.state === 'running') return;
+          ctx.resume().then(() => {
+            const retry = next.play();
+            if (retry && typeof retry.catch === 'function') {
+              retry.then(() => { pendingBgmKind = ''; }).catch(() => {});
+            } else {
+              pendingBgmKind = '';
+            }
+          }).catch(() => {});
+        });
+      };
+
       ensureAudioRunning();
       if (next.paused) {
-        next.currentTime = 0;
-        next.play().catch(() => {
-          pendingBgmKind = kind;
-        });
+        tryPlay();
       }
     }
 
