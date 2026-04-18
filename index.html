@@ -691,9 +691,7 @@
     const INVENTORY_SIZE = 4;
     const SFX_GAIN_MULT = 1.45;
     const BGM_VOLUME = 0.24;
-    const TAP_DROP_BOOST_MULT = 6.0;
-    const TAP_DROP_BOOST_MS = 650;
-    const TAP_DROP_MIN_ANGLE = 24;
+    const KEYBOARD_TILT_ANGLE = 30;
     const SFX_COOLDOWN_MS = {
       move: 85,
       land: 0,
@@ -745,7 +743,8 @@
     let audioUnlocked = false;
     let pendingBgmKind = '';
     let lastSfxAt = {};
-    let tapDropBoostUntil = 0;
+    let orientationListening = false;
+    let keyState = { left: false, right: false, up: false, down: false };
 
     // ============== 初始化 ==============
     function init() {
@@ -796,44 +795,67 @@
         if (e.key === '2') { useItemAt(1); e.preventDefault(); return; }
         if (e.key === '3') { useItemAt(2); e.preventDefault(); return; }
         if (e.key === '4') { useItemAt(3); e.preventDefault(); return; }
-        if (e.key === 'ArrowLeft')  { tiltX = -30; e.preventDefault(); }
-        if (e.key === 'ArrowRight') { tiltX =  30; e.preventDefault(); }
-        if (e.key === 'ArrowUp')    { tiltY = -30; e.preventDefault(); }
-        if (e.key === 'ArrowDown')  { tiltY =  30; e.preventDefault(); }
+        if (e.key === 'ArrowLeft')  { keyState.left = true;  applyKeyboardTilt(); e.preventDefault(); }
+        if (e.key === 'ArrowRight') { keyState.right = true; applyKeyboardTilt(); e.preventDefault(); }
+        if (e.key === 'ArrowUp')    { keyState.up = true;    applyKeyboardTilt(); e.preventDefault(); }
+        if (e.key === 'ArrowDown')  { keyState.down = true;  applyKeyboardTilt(); e.preventDefault(); }
       });
       document.addEventListener('keyup', e => {
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') tiltX = 0;
-        if (e.key === 'ArrowUp'   || e.key === 'ArrowDown')  tiltY = 0;
+        if (e.key === 'ArrowLeft')  { keyState.left = false;  applyKeyboardTilt(); }
+        if (e.key === 'ArrowRight') { keyState.right = false; applyKeyboardTilt(); }
+        if (e.key === 'ArrowUp')    { keyState.up = false;    applyKeyboardTilt(); }
+        if (e.key === 'ArrowDown')  { keyState.down = false;  applyKeyboardTilt(); }
       });
-
-      if (window.PointerEvent) {
-        window.addEventListener('pointerdown', e => {
-          if (e.button !== undefined && e.button !== 0) return;
-          triggerTapDropBoost();
-        }, { capture: true });
-        window.addEventListener('click', () => triggerTapDropBoost(), { capture: true });
-      } else {
-        window.addEventListener('touchstart', () => triggerTapDropBoost(), { passive: true, capture: true });
-        window.addEventListener('mousedown', e => {
-          if (e.button !== 0) return;
-          triggerTapDropBoost();
-        }, { capture: true });
-      }
+      window.addEventListener('blur', resetKeyboardInput);
 
       // 陀螺仪
-      if (window.DeviceOrientationEvent) {
-        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-          document.body.addEventListener('touchend', async () => {
-            const perm = await DeviceOrientationEvent.requestPermission().catch(() => 'denied');
-            if (perm === 'granted') window.addEventListener('deviceorientation', onOrient);
-          }, { once: true });
-        } else {
-          window.addEventListener('deviceorientation', onOrient);
-        }
-      }
+      setupOrientationAccess();
 
       renderIdle();
       syncAudioState();
+    }
+
+    function applyKeyboardTilt() {
+      if (keyState.left === keyState.right) tiltX = 0;
+      else tiltX = keyState.left ? -KEYBOARD_TILT_ANGLE : KEYBOARD_TILT_ANGLE;
+
+      if (keyState.up === keyState.down) tiltY = 0;
+      else tiltY = keyState.up ? -KEYBOARD_TILT_ANGLE : KEYBOARD_TILT_ANGLE;
+    }
+
+    function resetKeyboardInput() {
+      keyState.left = false;
+      keyState.right = false;
+      keyState.up = false;
+      keyState.down = false;
+      tiltX = 0;
+      tiltY = 0;
+    }
+
+    function setupOrientationAccess() {
+      if (!window.DeviceOrientationEvent) return;
+      if (typeof DeviceOrientationEvent.requestPermission !== 'function') {
+        if (!orientationListening) {
+          window.addEventListener('deviceorientation', onOrient);
+          orientationListening = true;
+        }
+      }
+    }
+
+    async function requestOrientationPermission() {
+      if (!window.DeviceOrientationEvent) return;
+      if (orientationListening) return;
+      if (typeof DeviceOrientationEvent.requestPermission !== 'function') {
+        setupOrientationAccess();
+        return;
+      }
+      const perm = await DeviceOrientationEvent.requestPermission().catch(() => 'denied');
+      if (perm === 'granted') {
+        window.addEventListener('deviceorientation', onOrient);
+        orientationListening = true;
+      } else {
+        showToast('陀螺仪未授权，可再次点击开始重试', '#ffd93d', 1200);
+      }
     }
 
     function bindStartOverlay() {
@@ -935,6 +957,7 @@
 
     function goHome() {
       playSfx('home');
+      resetKeyboardInput();
       const po = document.getElementById('pauseOverlay');
       po.classList.add('hidden');
       gameState = 'idle';
@@ -1304,12 +1327,6 @@
       setTimeout(() => el.classList.remove('show'), 260);
     }
 
-    function triggerTapDropBoost() {
-      if (gameState !== 'playing' || !piece) return;
-      tapDropBoostUntil = Math.max(tapDropBoostUntil, performance.now() + TAP_DROP_BOOST_MS);
-      moveAccY += 260;
-    }
-
     function bumpScore() {
       const el = document.getElementById('score');
       el.classList.remove('bump');
@@ -1361,6 +1378,8 @@
     // ============== 开始 ==============
     function startGame() {
       playSfx('start');
+      requestOrientationPermission();
+      resetKeyboardInput();
       const { maxW, maxH } = getCanvasBounds();
       COLS = selectedSize;
       ROWS = selectedSize;
@@ -1378,7 +1397,6 @@
       score = 0;
       tiltX = 0; tiltY = 0;
       moveAccX = 0; moveAccY = 0;
-      tapDropBoostUntil = 0;
       piecePlaced = 0;
       inventory = [];
       clears = 0;
@@ -1477,8 +1495,6 @@
       if (!piece) return;
 
       const speedMult = DIFF_CONFIG[selectedDiff].speedMult;
-      const boostActive = performance.now() < tapDropBoostUntil;
-      const effectiveTiltY = boostActive ? Math.max(tiltY, TAP_DROP_MIN_ANGLE) : tiltY;
 
       // X方向
       if (Math.abs(tiltX) >= MIN_ANGLE) {
@@ -1503,15 +1519,14 @@
       }
 
       // Y方向
-      if (Math.abs(effectiveTiltY) >= MIN_ANGLE) {
-        const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(effectiveTiltY)));
-        const yMult = boostActive ? speedMult * TAP_DROP_BOOST_MULT : speedMult;
-        const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * yMult;
+      if (Math.abs(tiltY) >= MIN_ANGLE) {
+        const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(tiltY)));
+        const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * speedMult;
         const interval = 1000 / Math.max(0.001, speed);
         moveAccY += dt;
         while (moveAccY >= interval) {
           moveAccY -= interval;
-          const dy = effectiveTiltY < 0 ? -1 : 1;
+          const dy = tiltY < 0 ? -1 : 1;
           const ny = piece.y + dy;
           if (!outOfBounds(piece.x, ny, piece.shape) && !overlapsGrid(piece.x, ny, piece.shape)) {
             piece.y = ny;
@@ -1524,7 +1539,7 @@
 
       // 锁定判定：
       // 当且仅当 倾斜方向的"下一格"是墙/方块 时，才锁定（固定当前方块）
-      if (shouldSettle(effectiveTiltY)) {
+      if (shouldSettle()) {
         settlePiece();
         if (gameState !== 'playing') return;
         const removed = checkLines();
@@ -1534,9 +1549,9 @@
     }
 
     // 判定是否需要固定：所有正在倾斜的方向的下一格都被阻挡
-    function shouldSettle(effectiveTiltY = tiltY) {
+    function shouldSettle() {
       const hasX = Math.abs(tiltX) >= MIN_ANGLE;
-      const hasY = Math.abs(effectiveTiltY) >= MIN_ANGLE;
+      const hasY = Math.abs(tiltY) >= MIN_ANGLE;
 
       // 不倾斜 → 不固定
       if (!hasX && !hasY) return false;
@@ -1550,7 +1565,7 @@
         xBlocked = outOfBounds(nx, piece.y, piece.shape) || overlapsGrid(nx, piece.y, piece.shape);
       }
       if (hasY) {
-        const dy = effectiveTiltY < 0 ? -1 : 1;
+        const dy = tiltY < 0 ? -1 : 1;
         const ny = piece.y + dy;
         yBlocked = outOfBounds(piece.x, ny, piece.shape) || overlapsGrid(piece.x, ny, piece.shape);
       }
