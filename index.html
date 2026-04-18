@@ -803,7 +803,6 @@
     let audioUnlocked = false;
     let pendingBgmKind = '';
     let lastSfxAt = {};
-    let tapDropBoostUntil = 0;
     let orientationListenerAttached = false;
     let sensorPermissionState = 'unknown';
     let lastGameOverReason = '';
@@ -949,19 +948,6 @@
         if (e.key === 'ArrowUp')    { keyState.up = false;    applyKeyboardTilt(); }
         if (e.key === 'ArrowDown')  { keyState.down = false;  applyKeyboardTilt(); }
       });
-
-      if (window.PointerEvent) {
-        document.addEventListener('pointerdown', e => {
-          if (e.button !== undefined && e.button !== 0) return;
-          triggerTapDropBoost();
-        });
-      } else {
-        document.addEventListener('touchstart', () => triggerTapDropBoost(), { passive: true });
-        document.addEventListener('mousedown', e => {
-          if (e.button !== 0) return;
-          triggerTapDropBoost();
-        });
-      }
 
       // 陀螺仪
       if (window.DeviceOrientationEvent) {
@@ -1567,7 +1553,7 @@
           clearTimeout(bgmSwitchTimer);
           bgmSwitchTimer = null;
         }
-        requestOrientationPermission();
+        requestSensorPermission();
         resetKeyboardInput();
         const { maxW, maxH } = getCanvasBounds();
         COLS = selectedSize;
