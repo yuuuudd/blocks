@@ -216,16 +216,88 @@
     let lastTime = 0;
     let selectedSize = 15;
     let selectedDiff = 'easy';
+    let lastMoveSfxAt = 0;
+    let audioPrimed = false;
+
+    const SFX_PATHS = {
+      piece_move: 'Assets/Audio/Generated/sfx_move_tap_v1.wav',
+      piece_land: 'Assets/Audio/Generated/sfx_land_thump_v1.wav',
+      clear_1: 'Assets/Audio/Generated/sfx_clear_1_ping_v1.wav',
+      clear_2: 'Assets/Audio/Generated/sfx_clear_2_pump_v1.wav',
+      clear_3: 'Assets/Audio/Generated/sfx_clear_3_bass_v1.wav',
+      clear_4: 'Assets/Audio/Generated/sfx_clear_4_blast_v1.wav',
+      game_over: 'Assets/Audio/Generated/sfx_game_over_low_v1.wav',
+      ui_start: 'Assets/Audio/Generated/sfx_level_clear_arp_v1.wav',
+      ui_click: 'Assets/Audio/Generated/sfx_flip_clack_v1.wav',
+    };
+
+    const SFX_VOLUME = {
+      piece_move: 0.22,
+      piece_land: 0.3,
+      clear_1: 0.36,
+      clear_2: 0.4,
+      clear_3: 0.48,
+      clear_4: 0.52,
+      game_over: 0.42,
+      ui_start: 0.3,
+      ui_click: 0.2,
+    };
+
+    const sfxPool = {};
+
+    function preloadSfx() {
+      Object.entries(SFX_PATHS).forEach(([key, path]) => {
+        const audio = new Audio(path);
+        audio.preload = 'auto';
+        audio.volume = SFX_VOLUME[key] ?? 0.3;
+        sfxPool[key] = audio;
+      });
+    }
+
+    function primeAudio() {
+      if (audioPrimed) return;
+      audioPrimed = true;
+      Object.values(sfxPool).forEach(a => {
+        a.muted = true;
+        a.currentTime = 0;
+        const p = a.play();
+        if (p && typeof p.then === 'function') {
+          p.then(() => {
+            a.pause();
+            a.currentTime = 0;
+            a.muted = false;
+          }).catch(() => {
+            a.muted = false;
+          });
+        } else {
+          a.muted = false;
+        }
+      });
+    }
+
+    function playSfx(key, opts = {}) {
+      const base = sfxPool[key];
+      if (!base) return;
+      const sound = opts.allowOverlap === false ? base : base.cloneNode(true);
+      sound.volume = opts.volume ?? (SFX_VOLUME[key] ?? 0.3);
+      sound.playbackRate = opts.rate ?? 1;
+      if (opts.allowOverlap === false) sound.currentTime = 0;
+      const p = sound.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    }
 
     // ============== 初始化 ==============
     function init() {
       canvas = document.getElementById('gameCanvas');
       ctx = canvas.getContext('2d');
       document.getElementById('best').textContent = best;
+      preloadSfx();
 
       // 模式按钮
       document.querySelectorAll('#sizeGroup .mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
+          primeAudio();
+          playSfx('ui_click', { allowOverlap: false });
           document.querySelectorAll('#sizeGroup .mode-btn').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
           selectedSize = parseInt(btn.dataset.size);
@@ -233,6 +305,8 @@
       });
       document.querySelectorAll('#diffGroup .mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
+          primeAudio();
+          playSfx('ui_click', { allowOverlap: false });
           document.querySelectorAll('#diffGroup .mode-btn').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
           selectedDiff = btn.dataset.diff;
@@ -292,6 +366,8 @@
 
     // ============== 开始 ==============
     function startGame() {
+      primeAudio();
+      playSfx('ui_start', { allowOverlap: false });
       const maxW = Math.min(window.innerWidth - 20, 420);
       const maxH = Math.min(window.innerHeight - 80, 600);
       COLS = selectedSize;
@@ -309,6 +385,7 @@
       score = 0;
       tiltX = 0; tiltY = 0;
       moveAccX = 0; moveAccY = 0;
+      lastMoveSfxAt = 0;
       document.getElementById('score').textContent = 0;
       gameState = 'playing';
       spawnPiece();
@@ -366,6 +443,10 @@
           // 下一格是否可以移动（不出界、不碰物）
           if (!outOfBounds(nx, piece.y, piece.shape) && !overlapsGrid(nx, piece.y, piece.shape)) {
             piece.x = nx;
+            if (performance.now() - lastMoveSfxAt > 45) {
+              playSfx('piece_move');
+              lastMoveSfxAt = performance.now();
+            }
           }
           // 如果下一格就已经是停止条件（无法继续该方向），则停下
           // 注意：不需要额外处理，方块保持在当前格不动，但不锁定
@@ -384,6 +465,10 @@
           const ny = piece.y + dy;
           if (!outOfBounds(piece.x, ny, piece.shape) && !overlapsGrid(piece.x, ny, piece.shape)) {
             piece.y = ny;
+            if (performance.now() - lastMoveSfxAt > 45) {
+              playSfx('piece_move');
+              lastMoveSfxAt = performance.now();
+            }
           }
         }
       } else {
@@ -451,6 +536,7 @@
     // ============== 固定 ==============
     function settlePiece() {
       if (!piece) return;
+      playSfx('piece_land');
       const c = piece.color + 1;
       for (const [px, py] of piece.shape) {
         const wx = piece.x + px, wy = piece.y + py;
@@ -493,6 +579,7 @@
         const bonus = [100, 300, 600, 1000, 1500][Math.min(removed - 1, 4)];
         score += bonus;
         document.getElementById('score').textContent = score;
+        playSfx(removed >= 4 ? 'clear_4' : `clear_${removed}`, { allowOverlap: false });
         // 消除闪光效果
         flashEffect();
       }
@@ -595,6 +682,7 @@
     // ============== 游戏结束 ==============
     function gameOver() {
       gameState = 'over';
+      playSfx('game_over', { allowOverlap: false });
       if (score > best) {
         best = score;
         localStorage.setItem('grav_best', best);
@@ -626,6 +714,8 @@
       ov.classList.remove('hidden');
       document.querySelectorAll('#sizeGroup2 .mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
+          primeAudio();
+          playSfx('ui_click', { allowOverlap: false });
           document.querySelectorAll('#sizeGroup2 .mode-btn').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
           selectedSize = parseInt(btn.dataset.size);
@@ -633,6 +723,8 @@
       });
       document.querySelectorAll('#diffGroup2 .mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
+          primeAudio();
+          playSfx('ui_click', { allowOverlap: false });
           document.querySelectorAll('#diffGroup2 .mode-btn').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
           selectedDiff = btn.dataset.diff;

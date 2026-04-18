@@ -490,6 +490,41 @@ OscillatorNode → GainNode → AudioContext.destination（扬声器）
 | 失败低音 | 60Hz正弦波渐弱，2s |
 | 猫方块"喵" | 500→300Hz正弦波滑音，200ms |
 
+### 10.3 音效文件路径与命名规范
+
+- 统一管理路径：`Assets/Audio/Generated/`
+- 历史或外部导入文件保留在：`Assets/Audio/`
+- 运行时优先读取 `Generated` 目录中的标准命名文件
+
+**命名格式**：
+
+```
+<type>_<event>_<variant>.<ext>
+```
+
+示例：
+
+- `sfx_move_tap_v1.ogg`
+- `sfx_clear_4_blast_v1.ogg`
+- `bgm_menu_loop_v1.ogg`
+
+**事件映射建议**：
+
+| 事件Key | 建议文件名 |
+|--------|-----------|
+| piece_move | sfx_move_tap_v1.wav |
+| piece_land | sfx_land_thump_v1.wav |
+| piece_rotate | sfx_rotate_swish_v1.wav |
+| wok_flip_start | sfx_flip_rise_v1.wav |
+| wok_flip_end | sfx_flip_clack_v1.wav |
+| clear_1 | sfx_clear_1_ping_v1.wav |
+| clear_2 | sfx_clear_2_pump_v1.wav |
+| clear_3 | sfx_clear_3_bass_v1.wav |
+| clear_4 | sfx_clear_4_blast_v1.wav |
+| level_clear | sfx_level_clear_arp_v1.wav |
+| game_over | sfx_game_over_low_v1.wav |
+| cat_trigger | sfx_cat_meow_v1.wav |
+
 ---
 
 ## 十一、美工可行性分析
