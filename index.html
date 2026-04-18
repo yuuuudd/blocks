@@ -617,7 +617,7 @@
               <label>画布大小</label>
               <div class="mode-btns" id="sizeGroup">
                 <button class="mode-btn" data-size="10">10×10</button>
-                <button class="mode-btn active" data-size="15">15×15</button>
+                <button class="mode-btn active" data-size="14">14×14</button>
                 <button class="mode-btn" data-size="20">20×20</button>
               </div>
             </div>
@@ -846,7 +846,7 @@
     let moveAccX = 0;
     let moveAccY = 0;
     let lastTime = 0;
-    let selectedSize = 15;
+    let selectedSize = 14;
     let selectedDiff = 'easy';
     let selectedMode = 'normal';
     let gameMode = 'normal';
@@ -1304,7 +1304,7 @@
 【移动与失败】
 倾斜手机（或方向键）控制方块滑行；倾斜越大速度越快。
 方块碰到边缘/已固定方块后，短暂缓冲才会固定。
-斩杀线：10×10 为中心3×3，15×15为5×5，20×20为7×7；固定方块进入即失败。
+斩杀线：10×10 为中心2×2，14×14为4×4，20×20为8×8；固定方块进入即失败。
 
 【道具模式】
 背包最多 ${INVENTORY_SIZE} 个，点击道具后会高亮可用格子，再点格子释放。
@@ -2236,24 +2236,31 @@
     }
 
     function centerRadius() {
-      if (COLS <= 10) return 1;
-      if (COLS <= 15) return 2;
-      return 3;
+      return Math.floor((getKillZoneSize() - 1) / 2);
+    }
+
+    function getKillZoneSize() {
+      if (COLS <= 10) return 2;
+      if (COLS <= 14) return 4;
+      return 8;
+    }
+
+    function getKillZoneBounds() {
+      const s = getKillZoneSize();
+      const x0 = Math.floor((COLS - s) / 2);
+      const y0 = Math.floor((ROWS - s) / 2);
+      return { x0, y0, x1: x0 + s, y1: y0 + s, s };
     }
 
     function isInCenterZone(x, y) {
-      const r = centerRadius();
-      const cx = Math.floor(COLS / 2);
-      const cy = Math.floor(ROWS / 2);
-      return Math.abs(x - cx) <= r && Math.abs(y - cy) <= r;
+      const { x0, y0, x1, y1 } = getKillZoneBounds();
+      return x >= x0 && x < x1 && y >= y0 && y < y1;
     }
 
     function isKillZoneOccupied() {
-      const r = centerRadius();
-      const cx = Math.floor(COLS / 2);
-      const cy = Math.floor(ROWS / 2);
-      for (let y = cy - r; y <= cy + r; y++) {
-        for (let x = cx - r; x <= cx + r; x++) {
+      const { x0, y0, x1, y1 } = getKillZoneBounds();
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
           if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
           if (grid[y][x]) return true;
         }
@@ -2281,7 +2288,7 @@
 
     function getPickupCap() {
       if (COLS <= 10) return 2;
-      if (COLS <= 15) return 3;
+      if (COLS <= 14) return 3;
       return 4;
     }
 
@@ -2934,7 +2941,7 @@
       const minV = Math.min(...values);
       const diff = maxV - minV;
 
-      const threshold = COLS <= 10 ? 4 : COLS <= 15 ? 6 : 8;
+      const threshold = COLS <= 10 ? 4 : COLS <= 14 ? 6 : 8;
       if (diff > threshold) return;
 
       const base = 120;
@@ -2960,13 +2967,11 @@
       ctx.fillStyle = '#0d1117';
       ctx.fillRect(-40, -40, canvas.width + 80, canvas.height + 80);
 
-      const r = centerRadius();
-      const cx = Math.floor(COLS / 2);
-      const cy = Math.floor(ROWS / 2);
-      const zx0 = Math.max(0, cx - r) * CELL;
-      const zy0 = Math.max(0, cy - r) * CELL;
-      const zx1 = (Math.min(COLS - 1, cx + r) + 1) * CELL;
-      const zy1 = (Math.min(ROWS - 1, cy + r) + 1) * CELL;
+      const { x0: kzX0, y0: kzY0, x1: kzX1, y1: kzY1 } = getKillZoneBounds();
+      const zx0 = kzX0 * CELL;
+      const zy0 = kzY0 * CELL;
+      const zx1 = kzX1 * CELL;
+      const zy1 = kzY1 * CELL;
       const zw = zx1 - zx0;
       const zh = zy1 - zy0;
       const zp = 0.55 + 0.45 * Math.sin(now / 260);
