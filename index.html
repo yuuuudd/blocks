@@ -255,7 +255,6 @@
         margin-left: 12px;
         margin-right: 12px;
         min-height: 44px;
-        bottom: 6px;
       }
     }
     #gameContainer {
@@ -349,10 +348,43 @@
     }
     .btn:active { transform: scale(0.95); }
     #overlay .btn {
-      position: sticky;
-      bottom: 12px;
       margin-top: 12px;
-      z-index: 25;
+    }
+    #deadOverlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(13, 17, 23, 0.38);
+      z-index: 23;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+    }
+    #deadCard {
+      width: min(380px, calc(100% - 20px));
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      padding: 14px;
+      color: #e6edf3;
+      text-align: center;
+    }
+    #deadTitle {
+      font-size: 16px;
+      font-weight: 900;
+      margin-bottom: 8px;
+      color: #ff6b6b;
+    }
+    #deadReason {
+      font-size: 12px;
+      color: rgba(230,237,243,0.75);
+      line-height: 1.5;
+    }
+    .deadRow {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
     }
     #pauseOverlay {
       position: absolute;
@@ -554,6 +586,14 @@
               </div>
             </div>
 
+            <div class="mode-section">
+              <label>权限</label>
+              <div class="mode-btns">
+                <button class="mode-btn" id="sensorPermBtn">开启重力</button>
+              </div>
+              <p class="subtitle" id="sensorPermTip" style="margin-bottom:0;">iPhone 需要手动开启重力权限</p>
+            </div>
+
             <button class="btn" id="startBtn">开始游戏</button>
           </div>
           <div id="pauseOverlay" class="hidden">
@@ -565,7 +605,25 @@
               </div>
               <div class="pauseRow">
                 <button class="pauseBtn" id="homeBtn">返回主页</button>
-                <button class="pauseBtn" id="settingsBtn">音效/震动</button>
+                <button class="pauseBtn" id="settingsBtn">设置</button>
+              </div>
+              <div class="pauseRow hidden" id="pauseSettingsRow">
+                <button class="pauseBtn" id="pauseSoundBtn">声音</button>
+                <button class="pauseBtn" id="pauseVibrateBtn">震动</button>
+              </div>
+            </div>
+          </div>
+          <div id="deadOverlay" class="hidden">
+            <div id="deadCard">
+              <div id="deadTitle">失败</div>
+              <div id="deadReason"></div>
+              <div class="deadRow">
+                <button class="pauseBtn primary" id="deadViewResultBtn">查看结果</button>
+                <button class="pauseBtn" id="deadRestartBtn">重新开始</button>
+              </div>
+              <div class="deadRow">
+                <button class="pauseBtn" id="deadHomeBtn">返回主页</button>
+                <button class="pauseBtn" id="deadCloseBtn">继续查看</button>
               </div>
             </div>
           </div>
@@ -754,6 +812,9 @@
     let pendingBgmKind = '';
     let lastSfxAt = {};
     let tapDropBoostUntil = 0;
+    let orientationListenerAttached = false;
+    let sensorPermissionState = 'unknown';
+    let lastGameOverReason = '';
 
     // ============== 初始化 ==============
     function init() {
@@ -790,13 +851,33 @@
       document.getElementById('homeBtn').addEventListener('click', goHome);
       document.getElementById('homeBtn').addEventListener('touchend', e => { e.preventDefault(); goHome(); });
       document.getElementById('settingsBtn').addEventListener('click', () => {
-        toggleSound();
-        toggleVibrate();
+        const row = document.getElementById('pauseSettingsRow');
+        if (row) row.classList.toggle('hidden');
       });
       document.getElementById('settingsBtn').addEventListener('touchend', e => {
         e.preventDefault();
-        toggleSound();
-        toggleVibrate();
+        const row = document.getElementById('pauseSettingsRow');
+        if (row) row.classList.toggle('hidden');
+      });
+      document.getElementById('pauseSoundBtn').addEventListener('click', toggleSound);
+      document.getElementById('pauseSoundBtn').addEventListener('touchend', e => { e.preventDefault(); toggleSound(); });
+      document.getElementById('pauseVibrateBtn').addEventListener('click', toggleVibrate);
+      document.getElementById('pauseVibrateBtn').addEventListener('touchend', e => { e.preventDefault(); toggleVibrate(); });
+
+      document.getElementById('deadViewResultBtn').addEventListener('click', showResultOverlay);
+      document.getElementById('deadViewResultBtn').addEventListener('touchend', e => { e.preventDefault(); showResultOverlay(); });
+      document.getElementById('deadRestartBtn').addEventListener('click', startGame);
+      document.getElementById('deadRestartBtn').addEventListener('touchend', e => { e.preventDefault(); startGame(); });
+      document.getElementById('deadHomeBtn').addEventListener('click', goHome);
+      document.getElementById('deadHomeBtn').addEventListener('touchend', e => { e.preventDefault(); goHome(); });
+      document.getElementById('deadCloseBtn').addEventListener('click', () => {
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('deadOverlay').classList.remove('hidden');
+      });
+      document.getElementById('deadCloseBtn').addEventListener('touchend', e => {
+        e.preventDefault();
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('deadOverlay').classList.remove('hidden');
       });
       document.getElementById('ruleBtn').addEventListener('click', toggleRulesPanel);
       document.getElementById('ruleBtn').addEventListener('touchend', e => { e.preventDefault(); toggleRulesPanel(); });
@@ -847,14 +928,10 @@
 
       // 陀螺仪
       if (window.DeviceOrientationEvent) {
-        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-          document.body.addEventListener('touchend', async () => {
-            const perm = await DeviceOrientationEvent.requestPermission().catch(() => 'denied');
-            if (perm === 'granted') window.addEventListener('deviceorientation', onOrient);
-          }, { once: true });
-        } else {
-          window.addEventListener('deviceorientation', onOrient);
-        }
+        initSensorPermissionState();
+        if (typeof DeviceOrientationEvent.requestPermission !== 'function') attachOrientationListener();
+      } else {
+        initSensorPermissionState();
       }
 
       renderIdle();
@@ -867,6 +944,7 @@
       const sizeGroup = ov.querySelector('#sizeGroup');
       const diffGroup = ov.querySelector('#diffGroup');
       const startBtn = ov.querySelector('#startBtn');
+      const sensorBtn = ov.querySelector('#sensorPermBtn');
 
       if (modeGroup) {
         modeGroup.querySelectorAll('.mode-btn').forEach(btn => {
@@ -902,6 +980,76 @@
         startBtn.addEventListener('click', startGame);
         startBtn.addEventListener('touchend', e => { e.preventDefault(); startGame(); });
       }
+      if (sensorBtn) {
+        sensorBtn.addEventListener('click', requestSensorPermission);
+        sensorBtn.addEventListener('touchend', e => { e.preventDefault(); requestSensorPermission(); });
+      }
+      updateSensorPermissionUI(ov);
+    }
+
+    function initSensorPermissionState() {
+      if (!window.DeviceOrientationEvent) {
+        sensorPermissionState = 'unsupported';
+        return;
+      }
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        sensorPermissionState = 'needs_request';
+        return;
+      }
+      sensorPermissionState = 'granted';
+    }
+
+    function attachOrientationListener() {
+      if (orientationListenerAttached) return;
+      if (!window.DeviceOrientationEvent) return;
+      window.addEventListener('deviceorientation', onOrient);
+      orientationListenerAttached = true;
+    }
+
+    async function requestSensorPermission() {
+      if (!window.DeviceOrientationEvent) {
+        sensorPermissionState = 'unsupported';
+        updateSensorPermissionUI();
+        showToast('当前设备不支持重力感应', '#8b949e', 900);
+        return;
+      }
+      if (typeof DeviceOrientationEvent.requestPermission !== 'function') {
+        sensorPermissionState = 'granted';
+        attachOrientationListener();
+        updateSensorPermissionUI();
+        showToast('重力已开启', '#64ffda', 800);
+        return;
+      }
+      const perm = await DeviceOrientationEvent.requestPermission().catch(() => 'denied');
+      sensorPermissionState = perm === 'granted' ? 'granted' : 'denied';
+      if (sensorPermissionState === 'granted') attachOrientationListener();
+      updateSensorPermissionUI();
+      showToast(sensorPermissionState === 'granted' ? '重力权限已开启' : '重力权限被拒绝', sensorPermissionState === 'granted' ? '#64ffda' : '#ff6b6b', 900);
+    }
+
+    function updateSensorPermissionUI(root = document) {
+      const btn = root.querySelector('#sensorPermBtn');
+      const tip = root.querySelector('#sensorPermTip');
+      if (!btn) return;
+      if (sensorPermissionState === 'unsupported') {
+        btn.textContent = '不支持';
+        btn.disabled = true;
+        if (tip) tip.textContent = '当前设备不支持重力感应';
+        return;
+      }
+      btn.disabled = false;
+      if (sensorPermissionState === 'granted') {
+        btn.textContent = '重力已开启';
+        if (tip) tip.textContent = '已开启：倾斜手机控制';
+        return;
+      }
+      if (sensorPermissionState === 'denied') {
+        btn.textContent = '重新开启重力';
+        if (tip) tip.textContent = '权限被拒绝，可再次尝试开启';
+        return;
+      }
+      btn.textContent = '开启重力';
+      if (tip) tip.textContent = 'iPhone 需要点击此按钮授权';
     }
 
     function updateRestartVisibility() {
@@ -1396,6 +1544,8 @@
       document.getElementById('gameContainer').style.height = canvas.height + 'px';
 
       document.getElementById('overlay').classList.add('hidden');
+      document.getElementById('deadOverlay').classList.add('hidden');
+      document.getElementById('pauseSettingsRow').classList.add('hidden');
       gameMode = selectedMode;
       document.getElementById('modeLabel').textContent = `${COLS}×${ROWS} · ${GAME_MODE[gameMode].label} · ${DIFF_CONFIG[selectedDiff].label}`;
 
@@ -1427,7 +1577,6 @@
       updateSettingsButtons();
       setPausedUI(false);
       updateItemBar();
-      ensureWorldPickups();
       spawnPiece();
       lastTime = performance.now();
       syncAudioState();
@@ -1495,7 +1644,6 @@
       if (pct > maxFill) maxFill = pct;
       const fillEl = document.getElementById('fill');
       if (fillEl) fillEl.textContent = `${pct}%`;
-      ensureWorldPickups();
     }
 
     function updateEffects(dt) {
@@ -1567,9 +1715,9 @@
           piece = null;
           explode3x3(cx, cy, true);
           const removed = checkLines();
+          if (gameState !== 'playing') return;
           applyBalanceReward(removed);
           maybeSpawnWorldPickup();
-          ensureWorldPickups();
           spawnPiece();
         }
         return;
@@ -1625,9 +1773,9 @@
         settlePiece();
         if (gameState !== 'playing') return;
         const removed = checkLines();
+        if (gameState !== 'playing') return;
         applyBalanceReward(removed);
         maybeSpawnWorldPickup();
-        ensureWorldPickups();
         if (maybeSpawnLitBombEvent()) return;
         spawnPiece();
       }
@@ -1683,8 +1831,9 @@
     }
 
     function centerRadius() {
-      if (COLS <= 10) return 0;
-      return 1;
+      if (COLS <= 10) return 1;
+      if (COLS <= 15) return 2;
+      return 3;
     }
 
     function isInCenterZone(x, y) {
@@ -1692,6 +1841,25 @@
       const cx = Math.floor((COLS - 1) / 2);
       const cy = Math.floor((ROWS - 1) / 2);
       return Math.abs(x - cx) <= r && Math.abs(y - cy) <= r;
+    }
+
+    function isKillZoneOccupied() {
+      const r = centerRadius();
+      const cx = Math.floor((COLS - 1) / 2);
+      const cy = Math.floor((ROWS - 1) / 2);
+      for (let y = cy - r; y <= cy + r; y++) {
+        for (let x = cx - r; x <= cx + r; x++) {
+          if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
+          if (grid[y][x]) return true;
+        }
+      }
+      return false;
+    }
+
+    function failIfKillZoneOccupied() {
+      if (!isKillZoneOccupied()) return false;
+      gameOver('斩杀线被占');
+      return true;
     }
 
     function showToast(text, color = '#ffd93d', ms = 900) {
@@ -1710,14 +1878,6 @@
       if (COLS <= 10) return 1;
       if (COLS <= 15) return 2;
       return 3;
-    }
-
-    function getPickupMinByFill(fillPct) {
-      const cap = getPickupCap();
-      if (fillPct >= 60) return Math.min(3, cap);
-      if (fillPct >= 45) return Math.min(2, cap);
-      if (fillPct >= 30) return Math.min(1, cap);
-      return 0;
     }
 
     function getPickupRollProb(fillPct) {
@@ -1770,15 +1930,6 @@
         }
       }
       return null;
-    }
-
-    function ensureWorldPickups() {
-      if (gameMode !== 'items') return;
-      const cap = getPickupCap();
-      const min = getPickupMinByFill(currentFillPct);
-      while (worldPickups.length < min && worldPickups.length < cap) {
-        spawnWorldPickup();
-      }
     }
 
     function maybeSpawnWorldPickup() {
