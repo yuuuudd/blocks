@@ -43,8 +43,10 @@
     #gamePanel {
       flex: 1 1 auto;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      gap: 10px;
       min-width: 0;
     }
     #infoPanel {
@@ -496,13 +498,11 @@
       opacity: 1;
     }
     #itemBar {
-      position: absolute;
-      left: 50%;
-      bottom: 30px;
-      transform: translateX(-50%);
       display: flex;
+      justify-content: center;
       gap: 10px;
-      z-index: 15;
+      margin-top: 10px;
+      z-index: 5;
       pointer-events: auto;
     }
     .item-slot {
@@ -543,6 +543,55 @@
       align-items: center;
       justify-content: center;
       pointer-events: none;
+    }
+    #rulesModal {
+      position: fixed;
+      inset: 0;
+      background: rgba(13, 17, 23, 0.62);
+      z-index: 120;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    #rulesCard {
+      width: min(560px, calc(100vw - 24px));
+      max-height: min(78vh, 720px);
+      overflow: auto;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(13,17,23,0.96);
+      color: #e6edf3;
+      padding: 14px;
+      box-shadow: 0 16px 36px rgba(0,0,0,0.45);
+    }
+    #rulesHead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    #rulesTitle {
+      font-size: 16px;
+      font-weight: 900;
+      color: #ffd93d;
+    }
+    #rulesCloseBtn {
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.08);
+      color: #e6edf3;
+      border-radius: 10px;
+      height: 34px;
+      padding: 0 12px;
+      cursor: pointer;
+      font-weight: 800;
+    }
+    #rulesBody {
+      font-size: 13px;
+      line-height: 1.7;
+      color: rgba(230,237,243,0.92);
+      white-space: pre-line;
     }
   </style>
 </head>
@@ -625,8 +674,8 @@
           </div>
           <div id="hint">📱 倾斜手机 / ⌨️ 方向键</div>
           <div id="toast"></div>
-          <div id="itemBar" class="hidden"></div>
         </div>
+        <div id="itemBar" class="hidden"></div>
       </div>
 
       <div id="infoPanel" class="hidden">
@@ -671,6 +720,15 @@
       </div>
     </div>
   </div>
+  <div id="rulesModal" class="hidden">
+    <div id="rulesCard">
+      <div id="rulesHead">
+        <div id="rulesTitle">游戏规则</div>
+        <button id="rulesCloseBtn">关闭</button>
+      </div>
+      <div id="rulesBody"></div>
+    </div>
+  </div>
 
   <script>
     const COLORS = ['#ff6b6b', '#64ffda', '#ffd93d', '#6bcbff', '#c792ea', '#ff9f43'];
@@ -687,12 +745,12 @@
     const TILT_DEADZONE = 2;
     const MOVE_CURVE_EXP = 1.6;
     const MOVE_SMOOTH_MS = 80;
-    const SETTLE_DELAY_MS = 180;
+    const SETTLE_DELAY_MS = 360;
 
     // 难度配置：speedMult 越大移动越快
     const DIFF_CONFIG = {
-      easy:   { label: '简单', speedMult: 0.6, scoreMult: 0.9 },
-      normal: { label: '普通', speedMult: 1.0, scoreMult: 1.0 },
+      easy:   { label: '简单', speedMult: 0.8, scoreMult: 0.9 },
+      normal: { label: '普通', speedMult: 1.2, scoreMult: 1.0 },
       hard:   { label: '困难', speedMult: 2.0, scoreMult: 1.15 },
     };
 
@@ -726,20 +784,18 @@
     ];
 
     const ITEM_TYPES = {
-      bomb:  { id: 1, icon: '💣', label: 'B' },
-      fill:  { id: 2, icon: '🛠️', label: 'F' },
-      laser: { id: 3, icon: '⚡', label: 'L' },
-      clean: { id: 4, icon: '🧹', label: 'C' },
-      single:{ id: 5, icon: '📦', label: '1' },
-      shuffle:{ id: 6, icon: '🔀', label: 'S' },
+      fill:   { id: 1, icon: '🧱', label: 'F' },
+      bomb:   { id: 2, icon: '💣', label: 'B' },
+      laser:  { id: 3, icon: '⚡', label: 'L' },
+      defuse: { id: 4, icon: '🗜️', label: 'D' },
     };
+    const ITEM_BY_ID = {};
+    for (const k of Object.keys(ITEM_TYPES)) ITEM_BY_ID[ITEM_TYPES[k].id] = ITEM_TYPES[k];
     const ITEM_LIST = [
+      { type: ITEM_TYPES.fill, weight: 60 },
       { type: ITEM_TYPES.bomb, weight: 18 },
-      { type: ITEM_TYPES.fill, weight: 18 },
-      { type: ITEM_TYPES.laser, weight: 16 },
-      { type: ITEM_TYPES.clean, weight: 14 },
-      { type: ITEM_TYPES.shuffle, weight: 12 },
-      { type: ITEM_TYPES.single, weight: 10 },
+      { type: ITEM_TYPES.laser, weight: 14 },
+      { type: ITEM_TYPES.defuse, weight: 8 },
     ];
     const ITEM_OFFSET = 100;
     const ITEM_SCORES = {
@@ -753,7 +809,7 @@
       shuffle: 100,
       magnet: 100,
     };
-    const WORLD_PICKUP_TRIGGER_EVERY = 3;
+    const WORLD_PICKUP_TRIGGER_EVERY = 2;
     const LIT_BOMB_TRIGGER_EVERY = 6;
     const LIT_BOMB_MS = 3000;
     const INVENTORY_SIZE = 4;
@@ -830,8 +886,14 @@
     let orientationListenerAttached = false;
     let sensorPermissionState = 'unknown';
     let lastGameOverReason = '';
+    let pausedByRules = false;
 
     function applyKeyboardTilt() {
+      if (pendingTarget) {
+        tiltX = 0;
+        tiltY = 0;
+        return;
+      }
       tiltX = (keyState.left ? -KEYBOARD_TILT_ANGLE : 0) + (keyState.right ? KEYBOARD_TILT_ANGLE : 0);
       tiltY = (keyState.up ? -KEYBOARD_TILT_ANGLE : 0) + (keyState.down ? KEYBOARD_TILT_ANGLE : 0);
     }
@@ -844,36 +906,12 @@
       applyKeyboardTilt();
     }
 
-    function shouldSuppressErrorMessage(msg) {
-      const s = String(msg || '').toLowerCase();
-      if (!s) return true;
-      if (s === 'script error.') return true;
-      if (s.includes('resizeobserver')) return true;
-      if (s.includes('passive event listener')) return true;
-      if (s.includes('unable to preventdefault')) return true;
-      if (s.includes('aborterror')) return true;
-      if (s.includes('the operation was aborted')) return true;
-      if (s.includes('networkerror')) return true;
-      if (s.includes('load failed')) return true;
-      return false;
-    }
-
     // ============== 初始化 ==============
     function init() {
       canvas = document.getElementById('gameCanvas');
       ctx = canvas.getContext('2d');
       document.getElementById('best').textContent = best;
       startOverlayHTML = document.getElementById('overlay').innerHTML;
-      window.addEventListener('error', e => {
-        const msg = (e && e.message) ? String(e.message) : '发生错误';
-        if (shouldSuppressErrorMessage(msg)) return;
-        showToast(msg, '#ff6b6b', 1400);
-      });
-      window.addEventListener('unhandledrejection', e => {
-        const msg = (e && e.reason) ? String(e.reason) : '发生错误';
-        if (shouldSuppressErrorMessage(msg)) return;
-        showToast(msg, '#ff6b6b', 1400);
-      });
       canvas.addEventListener('click', e => {
         if (gameState === 'dead') {
           document.getElementById('deadOverlay').classList.remove('hidden');
@@ -908,7 +946,7 @@
         const rect = canvas.getBoundingClientRect();
         const x = Math.floor((clientX - rect.left) / CELL);
         const y = Math.floor((clientY - rect.top) / CELL);
-        const valid = x >= 0 && x < COLS && y >= 0 && y < ROWS && grid[y][x] === 0 && !isPickupCell(x, y) && !isInCenterZone(x, y);
+        const valid = isUsableCellForItem(pendingTarget.itemTypeId, x, y);
         aimCell = { x, y, valid };
       };
       canvas.addEventListener('mousemove', e => updateAimFromClient(e.clientX, e.clientY));
@@ -971,6 +1009,11 @@
       });
       document.getElementById('ruleBtn').addEventListener('click', toggleRulesPanel);
       document.getElementById('ruleBtn').addEventListener('touchend', e => { e.preventDefault(); toggleRulesPanel(); });
+      document.getElementById('rulesCloseBtn').addEventListener('click', closeRulesModal);
+      document.getElementById('rulesCloseBtn').addEventListener('touchend', e => { e.preventDefault(); closeRulesModal(); });
+      document.getElementById('rulesModal').addEventListener('click', e => {
+        if (e.target && e.target.id === 'rulesModal') closeRulesModal();
+      });
       document.getElementById('scoreBtn').addEventListener('click', toggleScorePanel);
       document.getElementById('scoreBtn').addEventListener('touchend', e => { e.preventDefault(); toggleScorePanel(); });
       document.getElementById('soundBtn').addEventListener('click', toggleSound);
@@ -1181,6 +1224,31 @@
       }
     }
 
+    function pauseForRules() {
+      if (gameState !== 'playing') return;
+      pausedByRules = true;
+      gameState = 'paused';
+      setPausedUI(false);
+      updateRestartVisibility();
+      updatePauseVisibility();
+      updateInfoVisibility();
+      updateItemBar();
+    }
+
+    function resumeFromRules() {
+      if (!pausedByRules) return;
+      if (gameState !== 'paused') { pausedByRules = false; return; }
+      pausedByRules = false;
+      gameState = 'playing';
+      setPausedUI(false);
+      updateRestartVisibility();
+      updatePauseVisibility();
+      updateInfoVisibility();
+      updateItemBar();
+      lastTime = performance.now();
+      requestAnimationFrame(loop);
+    }
+
     function resumeGame() {
       if (gameState !== 'paused') return;
       playSfx('resume');
@@ -1223,17 +1291,46 @@
     }
 
     function toggleRulesPanel() {
-      const el = document.getElementById('panelRules');
-      if (!el) return;
-      el.classList.toggle('hidden');
-      if (!el.classList.contains('hidden')) {
-        el.innerHTML = `
-斩杀线：10×10 为中心 3×3 · 15×15 为 5×5 · 20×20 为 7×7，占到就结束。<br>
-均衡奖励：每放置 3 个方块检测一次，四边占领更均衡会额外加分。<br>
-道具模式：消除带字母格子获得道具；1-4 或点击道具槽使用。<br>
-得分倍率：简单 x${DIFF_CONFIG.easy.scoreMult} · 普通 x${DIFF_CONFIG.normal.scoreMult} · 困难 x${DIFF_CONFIG.hard.scoreMult}
+      const modal = document.getElementById('rulesModal');
+      const body = document.getElementById('rulesBody');
+      if (!modal || !body) return;
+      const willOpen = modal.classList.contains('hidden');
+      if (willOpen) {
+        pauseForRules();
+        body.textContent = `
+【目标】
+尽量消除整行/整列并生存更久，避免斩杀线被占。
+
+【移动与失败】
+倾斜手机（或方向键）控制方块滑行；倾斜越大速度越快。
+方块碰到边缘/已固定方块后，短暂缓冲才会固定。
+斩杀线：10×10 为中心3×3，15×15为5×5，20×20为7×7；固定方块进入即失败。
+
+【道具模式】
+背包最多 ${INVENTORY_SIZE} 个，点击道具后会高亮可用格子，再点格子释放。
+🧱 填补：在目标空格填1格。
+💣 炸弹：以目标空格为中心炸3×3。
+⚡ 十字激光：清除目标格所在整行和整列。
+🗜️ 拆弹钳：点燃炸弹出现时可拆除，并获得1个💣进背包。
+
+【点燃炸弹事件】
+事件触发后，点燃炸弹从正中央生成，可在3秒内移动；到时在当前位置爆炸3×3。
+
+【得分】
+得分由：放置分 + 消除分 + 均衡分 + 道具获得/使用分组成。
+难度只影响倍率与速度：简单x${DIFF_CONFIG.easy.scoreMult}，普通x${DIFF_CONFIG.normal.scoreMult}，困难x${DIFF_CONFIG.hard.scoreMult}。
         `.trim();
+        modal.classList.remove('hidden');
+      } else {
+        closeRulesModal();
       }
+    }
+
+    function closeRulesModal() {
+      const modal = document.getElementById('rulesModal');
+      if (!modal || modal.classList.contains('hidden')) return;
+      modal.classList.add('hidden');
+      resumeFromRules();
     }
 
     function toggleScorePanel() {
@@ -1638,9 +1735,15 @@
     }
 
     function getItemSpawnRate() {
-      if (selectedDiff === 'easy') return 0.14;
-      if (selectedDiff === 'hard') return 0.10;
-      return 0.12;
+      if (selectedDiff === 'easy') return 0.55;
+      if (selectedDiff === 'hard') return 0.35;
+      return 0.45;
+    }
+
+    function getPickupDiffMult() {
+      if (selectedDiff === 'easy') return 1.10;
+      if (selectedDiff === 'hard') return 0.90;
+      return 1.00;
     }
 
     function encodeCell(colorIndex1, itemTypeId = 0) {
@@ -1659,10 +1762,7 @@
     }
 
     function getItemById(id) {
-      for (const entry of ITEM_LIST) {
-        if (entry.type.id === id) return entry.type;
-      }
-      return null;
+      return ITEM_BY_ID[id] || null;
     }
 
     function updateItemBar() {
@@ -1732,6 +1832,11 @@
 
     function onOrient(e) {
       if (gameState !== 'playing') return;
+      if (pendingTarget) {
+        tiltX = 0;
+        tiltY = 0;
+        return;
+      }
       const gx = e.gamma || 0;
       const gy = e.beta  || 0;
       tiltX = Math.max(-MAX_ANGLE, Math.min(MAX_ANGLE, gx));
@@ -2056,6 +2161,7 @@
           }
         }
       }
+      collectPickupsForCurrentPiece();
 
       // 锁定判定：
       // 当且仅当 倾斜方向的"下一格"是墙/方块 时，才锁定（固定当前方块）
@@ -2174,16 +2280,18 @@
     }
 
     function getPickupCap() {
-      if (COLS <= 10) return 1;
-      if (COLS <= 15) return 2;
-      return 3;
+      if (COLS <= 10) return 2;
+      if (COLS <= 15) return 3;
+      return 4;
     }
 
     function getPickupRollProb(fillPct) {
-      if (fillPct < 30) return 0.15;
-      if (fillPct < 45) return 0.30;
-      if (fillPct < 60) return 0.45;
-      return 0.60;
+      let base = 0.75;
+      if (fillPct < 30) base = 0.75;
+      else if (fillPct < 45) base = 0.86;
+      else if (fillPct < 60) base = 0.94;
+      else base = 0.98;
+      return Math.max(0, Math.min(1, base * getPickupDiffMult()));
     }
 
     function getLitBombProb(fillPct) {
@@ -2296,14 +2404,10 @@
     }
 
     function getItemTint(itemTypeId) {
-      const coldBombId = ITEM_TYPES.coldBomb ? ITEM_TYPES.coldBomb.id : 0;
-      const defuseId = ITEM_TYPES.defuse ? ITEM_TYPES.defuse.id : 0;
-      const magnetId = ITEM_TYPES.magnet ? ITEM_TYPES.magnet.id : 0;
-      if (coldBombId && itemTypeId === coldBombId) return 'rgba(255,107,107,1)';
-      if (defuseId && itemTypeId === defuseId) return 'rgba(100,255,218,1)';
+      if (itemTypeId === ITEM_TYPES.bomb.id) return 'rgba(255,107,107,1)';
       if (itemTypeId === ITEM_TYPES.laser.id) return 'rgba(107,203,255,1)';
-      if (magnetId && itemTypeId === magnetId) return 'rgba(199,146,234,1)';
-      return 'rgba(255,217,61,1)';
+      if (itemTypeId === ITEM_TYPES.defuse.id) return 'rgba(100,255,218,1)';
+      return 'rgba(199,146,234,1)';
     }
 
     function collectWorldPickupAt(x, y) {
@@ -2325,7 +2429,7 @@
           t: 0,
           maxT: 520,
           color: getItemTint(p.itemTypeId),
-          label: meta ? meta.label : '',
+          label: meta ? meta.icon : '',
         });
       }
       playSfx('itemCollect');
@@ -2404,79 +2508,61 @@
       if (gameMode !== 'items') return;
       const itemTypeId = inventory[slotIndex];
       if (!itemTypeId) return;
-      const coldBombId = ITEM_TYPES.coldBomb ? ITEM_TYPES.coldBomb.id : 0;
-      const magnetId = ITEM_TYPES.magnet ? ITEM_TYPES.magnet.id : 0;
-      const needsTarget =
-        (coldBombId && itemTypeId === coldBombId && typeof useColdBombAt === 'function') ||
-        (itemTypeId === ITEM_TYPES.laser.id && typeof useLaserAt === 'function') ||
-        (magnetId && itemTypeId === magnetId);
-      if (needsTarget) {
-        if (pendingTarget && pendingTarget.slotIndex === slotIndex && pendingTarget.itemTypeId === itemTypeId) {
-          pendingTarget = null;
-          aimCell = null;
-          updateItemBar();
-          return;
-        }
-        pendingTarget = { slotIndex, itemTypeId };
-        pendingTargetPulseT = performance.now();
+      if (pendingTarget && pendingTarget.slotIndex === slotIndex && pendingTarget.itemTypeId === itemTypeId) {
+        pendingTarget = null;
         aimCell = null;
-        const k = 'grav_first_item_hint_v1';
-        if (!localStorage.getItem(k)) {
-          localStorage.setItem(k, '1');
-          showToast('提示：选道具后，再点棋盘空格使用', '#ffd93d', 1200);
-        } else {
-          showToast('点击棋盘空格使用', '#ffd93d', 900);
-        }
+        tiltX = 0; tiltY = 0; moveAccX = 0; moveAccY = 0;
         updateItemBar();
         return;
       }
-
-      inventory.splice(slotIndex, 1);
-      updateItemBar();
-      itemUseCount += 1;
-      useItem(itemTypeId);
-    }
-
-    function useItem(itemTypeId) {
-      if (itemTypeId === ITEM_TYPES.bomb.id) return useBomb();
-      if (itemTypeId === ITEM_TYPES.fill.id) return useFill();
-      if (itemTypeId === ITEM_TYPES.laser.id) return useLaser();
-      if (itemTypeId === ITEM_TYPES.clean.id) return useClean();
-      if (itemTypeId === ITEM_TYPES.single.id) return useSingleify();
-      if (itemTypeId === ITEM_TYPES.shuffle.id) return useShuffle();
-    }
-
-    function useBomb() {
-      const rows = Math.min(3, ROWS);
-      let cleared = 0;
-      for (let y = ROWS - 1; y >= ROWS - rows; y--) {
-        for (let x = 0; x < COLS; x++) {
-          const cell = grid[y][x];
-          if (!cell) continue;
-          const { itemTypeId } = decodeCell(cell);
-          if (itemTypeId) collectItem(itemTypeId);
-          grid[y][x] = 0;
-          cleared += 1;
-        }
-      }
-      addScorePart('itemUse', cleared * ITEM_SCORES.bombPerCell, `炸弹 +${cleared * ITEM_SCORES.bombPerCell}`, '#ff6b6b');
-      const removed = checkLines();
-      applyBalanceReward(removed);
-    }
-
-    function useLaser() {
-      if (!piece) {
-        showToast('没有可用目标', '#ffd93d');
+      if (itemTypeId === ITEM_TYPES.defuse.id && !(piece && piece.isLitBomb)) {
+        showToast('没有点燃炸弹', '#ffd93d', 900);
         return;
       }
-      let sx = 0, sy = 0;
-      for (const [px, py] of piece.shape) {
-        sx += piece.x + px;
-        sy += piece.y + py;
+      pendingTarget = { slotIndex, itemTypeId };
+      pendingTargetPulseT = performance.now();
+      aimCell = null;
+      tiltX = 0; tiltY = 0; moveAccX = 0; moveAccY = 0;
+      resetKeyboardInput();
+      const k = 'grav_first_item_hint_v2';
+      if (!localStorage.getItem(k)) {
+        localStorage.setItem(k, '1');
+        showToast('提示：选道具后，再点棋盘格子使用', '#ffd93d', 1200);
+      } else {
+        showToast('点击棋盘格子使用', '#ffd93d', 900);
       }
-      const tx = Math.max(0, Math.min(COLS - 1, Math.round(sx / piece.shape.length)));
-      const ty = Math.max(0, Math.min(ROWS - 1, Math.round(sy / piece.shape.length)));
+      updateItemBar();
+    }
 
+    function removeUsedItemFromInventory(slotIndex, itemTypeId) {
+      if (!inventory.length) return;
+      if (inventory[slotIndex] === itemTypeId) {
+        inventory.splice(slotIndex, 1);
+        return;
+      }
+      const idx = inventory.findIndex(v => v === itemTypeId);
+      if (idx >= 0) inventory.splice(idx, 1);
+    }
+
+    function useFillAt(tx, ty) {
+      const colorIndex1 = Math.floor(Math.random() * COLORS.length) + 1;
+      grid[ty][tx] = encodeCell(colorIndex1, 0);
+      addScorePart('itemUse', ITEM_SCORES.fillPerCell, `填补 +${ITEM_SCORES.fillPerCell}`, '#c792ea');
+      landBounces.push({ x: tx, y: ty, t: 0, maxT: 180 });
+      triggerShake(6, 120);
+      const removed = checkLines();
+      applyBalanceReward(removed);
+      return true;
+    }
+
+    function useBombAt(tx, ty) {
+      explode3x3(tx, ty, false);
+      const removed = checkLines();
+      applyBalanceReward(removed);
+      return true;
+    }
+
+    function useLaserAt(tx, ty) {
       let cleared = 0;
       for (let x = 0; x < COLS; x++) {
         const cell = grid[ty][x];
@@ -2487,6 +2573,7 @@
         cleared += 1;
       }
       for (let y = 0; y < ROWS; y++) {
+        if (y === ty) continue;
         const cell = grid[y][tx];
         if (!cell) continue;
         const { itemTypeId } = decodeCell(cell);
@@ -2497,42 +2584,18 @@
       addScorePart('itemUse', cleared * ITEM_SCORES.laserPerCell, `激光 +${cleared * ITEM_SCORES.laserPerCell}`, '#6bcbff');
       const removed = checkLines();
       applyBalanceReward(removed);
-      playSfx('itemUse');
       return true;
     }
 
-    function useMagnetAt(tx, ty) {
-      const radius = 2;
-      const coords = [];
-      for (let y = Math.max(0, ty - radius); y <= Math.min(ROWS - 1, ty + radius); y++) {
-        for (let x = Math.max(0, tx - radius); x <= Math.min(COLS - 1, tx + radius); x++) {
-          if (!grid[y][x]) continue;
-          const dist = Math.abs(tx - x) + Math.abs(ty - y);
-          coords.push({ x, y, dist });
-        }
-      }
-      coords.sort((a, b) => b.dist - a.dist);
-      let moved = 0;
-      for (const c of coords) {
-        const v = grid[c.y][c.x];
-        if (!v) continue;
-        const dx = tx === c.x ? 0 : (tx > c.x ? 1 : -1);
-        const dy = ty === c.y ? 0 : (ty > c.y ? 1 : -1);
-        let nx = c.x;
-        let ny = c.y;
-        if (Math.abs(tx - c.x) >= Math.abs(ty - c.y)) nx = c.x + dx;
-        else ny = c.y + dy;
-        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
-        if (grid[ny][nx]) continue;
-        grid[ny][nx] = v;
-        grid[c.y][c.x] = 0;
-        moved += 1;
-      }
-      if (ITEM_SCORES.magnet) addScorePart('itemUse', ITEM_SCORES.magnet, `磁铁 +${ITEM_SCORES.magnet}`, '#64ffda');
-      showToast(moved > 0 ? '磁吸！' : '磁铁无效', '#64ffda', 650);
-      const removed = checkLines();
-      applyBalanceReward(removed);
-      playSfx('itemUse');
+    function useDefuseAt(tx, ty) {
+      if (!(piece && piece.isLitBomb && piece.x === tx && piece.y === ty)) return false;
+      piece = null;
+      moveAccX = 0;
+      moveAccY = 0;
+      pushInventory(ITEM_TYPES.bomb.id, '拆弹成功：获得💣');
+      triggerShake(10, 160);
+      triggerFlash('rgba(100,255,218,0.22)', 160);
+      spawnPiece();
       return true;
     }
 
@@ -2540,151 +2603,40 @@
       return worldPickups.some(p => p.x === x && p.y === y);
     }
 
-    function usePendingItemAtCell(x, y) {
-      if (!pendingTarget) return false;
+    function isUsableCellForItem(itemTypeId, x, y) {
       if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return false;
-      if (grid[y][x] !== 0) {
-        showToast('请选择空格', '#ffd93d', 700);
-        return false;
+      if (itemTypeId === ITEM_TYPES.defuse.id) {
+        return !!(piece && piece.isLitBomb && piece.x === x && piece.y === y);
       }
-      if (isPickupCell(x, y)) {
-        showToast('该格有拾取点', '#ffd93d', 700);
-        return false;
-      }
-      if (isInCenterZone(x, y)) {
-        showToast('斩杀线不可用', '#ff6b6b', 700);
-        return false;
-      }
-
-      const { itemTypeId, slotIndex } = pendingTarget;
-      const coldBombId = ITEM_TYPES.coldBomb ? ITEM_TYPES.coldBomb.id : 0;
-      const magnetId = ITEM_TYPES.magnet ? ITEM_TYPES.magnet.id : 0;
-      let ok = false;
-      if (coldBombId && itemTypeId === coldBombId && typeof useColdBombAt === 'function') ok = useColdBombAt(x, y);
-      else if (itemTypeId === ITEM_TYPES.laser.id && typeof useLaserAt === 'function') ok = useLaserAt(x, y);
-      else if (magnetId && itemTypeId === magnetId) ok = useMagnetAt(x, y);
-      else ok = false;
-      if (!ok) return false;
-
-      const realId = inventory[slotIndex];
-      if (realId !== itemTypeId) {
-        const idx = inventory.findIndex(v => v === itemTypeId);
-        if (idx >= 0) inventory.splice(idx, 1);
-      } else {
-        inventory.splice(slotIndex, 1);
-      }
-      updateItemBar();
-      itemUseCount += 1;
-      pendingTarget = null;
-      updateItemBar();
+      if (grid[y][x] !== 0) return false;
+      if (isPickupCell(x, y)) return false;
+      if (isInCenterZone(x, y)) return false;
       return true;
     }
 
-    function useClean() {
-      const present = new Set();
-      for (let y = 0; y < ROWS; y++) {
-        for (let x = 0; x < COLS; x++) {
-          const cell = grid[y][x];
-          if (!cell) continue;
-          const { colorIndex1 } = decodeCell(cell);
-          present.add(colorIndex1);
-        }
+    function usePendingItemAtCell(x, y) {
+      if (!pendingTarget) return false;
+      if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return false;
+      const { itemTypeId, slotIndex } = pendingTarget;
+      let ok = false;
+      if (!isUsableCellForItem(itemTypeId, x, y)) {
+        if (itemTypeId === ITEM_TYPES.defuse.id) showToast('请点击点燃炸弹', '#ffd93d', 900);
+        else showToast('请选择可用空格', '#ffd93d', 900);
+        return false;
       }
-      if (present.size === 0) {
-        showToast('盘面为空', '#ffd93d');
-        return;
-      }
-      const arr = Array.from(present);
-      const target = arr[Math.floor(Math.random() * arr.length)];
-      let cleared = 0;
-      for (let y = 0; y < ROWS; y++) {
-        for (let x = 0; x < COLS; x++) {
-          const cell = grid[y][x];
-          if (!cell) continue;
-          const { itemTypeId, colorIndex1 } = decodeCell(cell);
-          if (colorIndex1 !== target) continue;
-          if (itemTypeId) collectItem(itemTypeId);
-          grid[y][x] = 0;
-          cleared += 1;
-        }
-      }
-      addScorePart('itemUse', cleared * ITEM_SCORES.cleanPerCell, `清扫 +${cleared * ITEM_SCORES.cleanPerCell}`, '#ffd93d');
-      const removed = checkLines();
-      applyBalanceReward(removed);
-    }
-
-    function useFill() {
-      const holes = [];
-      for (let x = 0; x < COLS; x++) {
-        let seenBlock = false;
-        for (let y = 0; y < ROWS; y++) {
-          if (grid[y][x]) {
-            seenBlock = true;
-            continue;
-          }
-          if (seenBlock) holes.push({ x, y });
-        }
-      }
-      holes.sort((a, b) => b.y - a.y);
-      const count = Math.min(5, holes.length);
-      for (let i = 0; i < count; i++) {
-        const { x, y } = holes[i];
-        const colorIndex1 = Math.floor(Math.random() * COLORS.length) + 1;
-        if (isInCenterZone(x, y)) continue;
-        grid[y][x] = encodeCell(colorIndex1, 0);
-      }
-      addScorePart('itemUse', count * ITEM_SCORES.fillPerCell, `填补 +${count * ITEM_SCORES.fillPerCell}`, '#c792ea');
-      const removed = checkLines();
-      applyBalanceReward(removed);
-    }
-
-    function useSingleify() {
-      if (!piece) {
-        showToast('没有可变形方块', '#ffd93d');
-        return;
-      }
-      piece.shape = [[0,0]];
-      piece.itemTypeId = 0;
-      piece.itemIndex = -1;
-      if (overlapsGrid(piece.x, piece.y, piece.shape)) {
-        let placed = false;
-        for (let r = 0; r < Math.max(COLS, ROWS) && !placed; r++) {
-          for (let dy = -r; dy <= r && !placed; dy++) {
-            for (let dx = -r; dx <= r && !placed; dx++) {
-              const nx = piece.x + dx;
-              const ny = piece.y + dy;
-              if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
-              if (overlapsGrid(nx, ny, piece.shape)) continue;
-              piece.x = nx;
-              piece.y = ny;
-              placed = true;
-            }
-          }
-        }
-        if (!placed) gameOver('无处可放');
-      }
-      showToast('单格化', '#64ffda');
-    }
-
-    function useShuffle() {
-      for (let x = 0; x < COLS; x++) {
-        const col = [];
-        for (let y = 0; y < ROWS; y++) {
-          const cell = grid[y][x];
-          if (cell) col.push(cell);
-        }
-        for (let y = 0; y < ROWS; y++) grid[y][x] = 0;
-        let y = ROWS - 1;
-        for (let i = col.length - 1; i >= 0; i--) {
-          while (y >= 0 && isInCenterZone(x, y)) y -= 1;
-          if (y < 0) break;
-          grid[y][x] = col[i];
-          y -= 1;
-        }
-      }
-      addScorePart('itemUse', ITEM_SCORES.shuffle, `压缩 +${ITEM_SCORES.shuffle}`, '#64ffda');
-      const removed = checkLines();
-      applyBalanceReward(removed);
+      if (itemTypeId === ITEM_TYPES.fill.id) ok = useFillAt(x, y);
+      else if (itemTypeId === ITEM_TYPES.bomb.id) ok = useBombAt(x, y);
+      else if (itemTypeId === ITEM_TYPES.laser.id) ok = useLaserAt(x, y);
+      else if (itemTypeId === ITEM_TYPES.defuse.id) ok = useDefuseAt(x, y);
+      else ok = false;
+      if (!ok) return false;
+      removeUsedItemFromInventory(slotIndex, itemTypeId);
+      itemUseCount += 1;
+      pendingTarget = null;
+      aimCell = null;
+      tiltX = 0; tiltY = 0; moveAccX = 0; moveAccY = 0;
+      updateItemBar();
+      return true;
     }
 
     // ============== 固定 ==============
@@ -3090,9 +3042,9 @@
             if (b) {
               const p = Math.min(1, b.t / b.maxT);
               const k = Math.sin((1 - p) * Math.PI);
-              drawBlockScaled(x, y, COLORS[meta.colorIndex1 - 1], 1 + 0.12 * k, 1, false, item ? item.label : '');
+              drawBlockScaled(x, y, COLORS[meta.colorIndex1 - 1], 1 + 0.12 * k, 1, false, item ? item.icon : '');
             } else {
-              drawBlock(x, y, COLORS[meta.colorIndex1 - 1], 1, false, item ? item.label : '');
+              drawBlock(x, y, COLORS[meta.colorIndex1 - 1], 1, false, item ? item.icon : '');
             }
           }
         }
@@ -3102,11 +3054,10 @@
         const a = 0.10 + 0.06 * Math.sin((now - pendingTargetPulseT) / 160);
         ctx.fillStyle = 'rgba(13, 17, 23, 0.35)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const itemTypeId = pendingTarget.itemTypeId;
         for (let y = 0; y < ROWS; y++) {
           for (let x = 0; x < COLS; x++) {
-            if (grid[y][x] !== 0) continue;
-            if (isInCenterZone(x, y)) continue;
-            if (isPickupCell(x, y)) continue;
+            if (!isUsableCellForItem(itemTypeId, x, y)) continue;
             ctx.fillStyle = `rgba(255, 217, 61, ${a})`;
             ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
             ctx.strokeStyle = `rgba(255, 217, 61, ${0.40 + a})`;
@@ -3141,14 +3092,7 @@
           if (!meta) continue;
           const px = p.x * CELL + CELL / 2;
           const py = p.y * CELL + CELL / 2;
-          const coldBombId = ITEM_TYPES.coldBomb ? ITEM_TYPES.coldBomb.id : 0;
-          const defuseId = ITEM_TYPES.defuse ? ITEM_TYPES.defuse.id : 0;
-          const magnetId = ITEM_TYPES.magnet ? ITEM_TYPES.magnet.id : 0;
-          let color = 'rgba(255,217,61,1)';
-          if (coldBombId && p.itemTypeId === coldBombId) color = 'rgba(255,107,107,1)';
-          if (defuseId && p.itemTypeId === defuseId) color = 'rgba(100,255,218,1)';
-          if (p.itemTypeId === ITEM_TYPES.laser.id) color = 'rgba(107,203,255,1)';
-          if (magnetId && p.itemTypeId === magnetId) color = 'rgba(199,146,234,1)';
+          const color = getItemTint(p.itemTypeId);
           ctx.globalAlpha = 1;
           ctx.shadowColor = color;
           ctx.shadowBlur = 22;
@@ -3171,7 +3115,7 @@
           ctx.font = `${Math.max(12, Math.floor(CELL * 0.42))}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText(meta.label, px, py + 0.5);
+          ctx.fillText(meta.icon, px, py + 0.5);
         }
       }
 
@@ -3241,7 +3185,7 @@
           const gx = piece.x + px, gy = piece.y + py;
           if (gx >= 0 && gx < COLS && gy >= 0 && gy < ROWS) {
             const item = (gameMode === 'items' && piece.itemTypeId && i === piece.itemIndex) ? getItemById(piece.itemTypeId) : null;
-            drawBlock(bx + px, by + py, COLORS[piece.color], 1, nearEdge || !!item, item ? item.label : '');
+            drawBlock(bx + px, by + py, COLORS[piece.color], 1, nearEdge || !!item, item ? item.icon : '');
           }
         }
         }
