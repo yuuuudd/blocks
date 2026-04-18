@@ -808,6 +808,7 @@
     let audioCtx = null;
     let menuBgm = null;
     let gameBgm = null;
+    let deathBgm = null;
     let activeBgm = '';
     let bgmSwitchTimer = null;
     let worldPickups = [];
@@ -1285,7 +1286,7 @@
       ensureBgmTracks();
       ensureAudioRunning();
       if (!soundOn) return;
-      const kind = pendingBgmKind || (gameState === 'playing' ? 'game' : 'menu');
+      const kind = pendingBgmKind || (gameState === 'playing' ? 'game' : gameState === 'dead' ? 'death' : 'menu');
       pendingBgmKind = '';
       playBgm(kind);
     }
@@ -1413,17 +1414,29 @@
 
     function ensureBgmTracks() {
       if (!menuBgm) {
-        menuBgm = new Audio('Assets/Audio/Enum.mp3');
+        menuBgm = new Audio('Assets/Audio/EnumBGM.mp3');
         menuBgm.loop = true;
         menuBgm.preload = 'auto';
         menuBgm.volume = BGM_VOLUME;
       }
       if (!gameBgm) {
-        gameBgm = new Audio('Assets/Audio/Main.mp3');
+        gameBgm = new Audio('Assets/Audio/MainBGM.mp3');
         gameBgm.loop = true;
         gameBgm.preload = 'auto';
         gameBgm.volume = BGM_VOLUME;
       }
+      if (!deathBgm) {
+        deathBgm = new Audio('Assets/Audio/DeathBGM.mp3');
+        deathBgm.loop = true;
+        deathBgm.preload = 'auto';
+        deathBgm.volume = BGM_VOLUME;
+      }
+    }
+
+    function getBgmTrack(kind) {
+      if (kind === 'game') return gameBgm;
+      if (kind === 'death') return deathBgm;
+      return menuBgm;
     }
 
     function pauseBgm(track) {
@@ -1434,8 +1447,8 @@
 
     function playBgm(kind) {
       ensureBgmTracks();
-      const next = kind === 'game' ? gameBgm : menuBgm;
-      const prev = activeBgm === 'game' ? gameBgm : activeBgm === 'menu' ? menuBgm : null;
+      const next = getBgmTrack(kind);
+      const prev = activeBgm ? getBgmTrack(activeBgm) : null;
       if (prev && prev !== next) pauseBgm(prev);
       activeBgm = kind;
       if (!soundOn) return;
@@ -1456,6 +1469,7 @@
       ensureBgmTracks();
       pauseBgm(menuBgm);
       pauseBgm(gameBgm);
+      pauseBgm(deathBgm);
       activeBgm = '';
     }
 
@@ -1466,6 +1480,10 @@
       }
       if (gameState === 'playing') {
         playBgm('game');
+        return;
+      }
+      if (gameState === 'dead') {
+        playBgm('death');
         return;
       }
       playBgm('menu');
