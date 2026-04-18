@@ -691,8 +691,8 @@
     const INVENTORY_SIZE = 4;
     const SFX_GAIN_MULT = 1.45;
     const BGM_VOLUME = 0.24;
-    const TAP_DROP_BOOST_MULT = 2.8;
-    const TAP_DROP_BOOST_MS = 320;
+    const TAP_DROP_BOOST_MULT = 6.0;
+    const TAP_DROP_BOOST_MS = 650;
     const TAP_DROP_MIN_ANGLE = 24;
     const SFX_COOLDOWN_MS = {
       move: 85,
@@ -807,16 +807,17 @@
       });
 
       if (window.PointerEvent) {
-        document.addEventListener('pointerdown', e => {
+        window.addEventListener('pointerdown', e => {
           if (e.button !== undefined && e.button !== 0) return;
           triggerTapDropBoost();
-        });
+        }, { capture: true });
+        window.addEventListener('click', () => triggerTapDropBoost(), { capture: true });
       } else {
-        document.addEventListener('touchstart', () => triggerTapDropBoost(), { passive: true });
-        document.addEventListener('mousedown', e => {
+        window.addEventListener('touchstart', () => triggerTapDropBoost(), { passive: true, capture: true });
+        window.addEventListener('mousedown', e => {
           if (e.button !== 0) return;
           triggerTapDropBoost();
-        });
+        }, { capture: true });
       }
 
       // 陀螺仪
@@ -1306,6 +1307,7 @@
     function triggerTapDropBoost() {
       if (gameState !== 'playing' || !piece) return;
       tapDropBoostUntil = Math.max(tapDropBoostUntil, performance.now() + TAP_DROP_BOOST_MS);
+      moveAccY += 260;
     }
 
     function bumpScore() {
@@ -1476,7 +1478,7 @@
 
       const speedMult = DIFF_CONFIG[selectedDiff].speedMult;
       const boostActive = performance.now() < tapDropBoostUntil;
-      const effectiveTiltY = (boostActive && Math.abs(tiltY) < MIN_ANGLE) ? TAP_DROP_MIN_ANGLE : tiltY;
+      const effectiveTiltY = boostActive ? Math.max(tiltY, TAP_DROP_MIN_ANGLE) : tiltY;
 
       // X方向
       if (Math.abs(tiltX) >= MIN_ANGLE) {
