@@ -741,11 +741,17 @@
     const ITEM_SCORES = {
       collect: 80,
       bombPerCell: 20,
+      coldBombPerCell: 20,
+      litBombPerCell: 28,
       laserPerCell: 15,
       cleanPerCell: 10,
       fillPerCell: 50,
       shuffle: 100,
+      magnet: 100,
     };
+    const WORLD_PICKUP_TRIGGER_EVERY = 3;
+    const LIT_BOMB_TRIGGER_EVERY = 6;
+    const LIT_BOMB_MS = 3000;
     const INVENTORY_SIZE = 4;
     const SFX_GAIN_MULT = 1.45;
     const BGM_VOLUME = 0.24;
@@ -799,12 +805,14 @@
     let menuBgm = null;
     let gameBgm = null;
     let activeBgm = '';
+    let bgmSwitchTimer = null;
     let worldPickups = [];
     let explosions = [];
     let particles = [];
     let lineFlashes = [];
     let pendingTarget = null;
     let pendingTargetPulseT = 0;
+    let currentFillPct = 0;
     let audioUnlocked = false;
     let pendingBgmKind = '';
     let lastSfxAt = {};
@@ -1693,6 +1701,7 @@
       const dt = Math.min(ts - lastTime, 100);
       lastTime = ts;
       update(dt);
+      updateEffects(dt);
       updateMetrics(dt);
       refreshScorePanel();
       render();
@@ -1711,6 +1720,7 @@
         }
       }
       const pct = total > 0 ? Math.min(100, Math.round((filled / total) * 100)) : 0;
+      currentFillPct = pct;
       if (pct > maxFill) maxFill = pct;
       const fillEl = document.getElementById('fill');
       if (fillEl) fillEl.textContent = `${pct}%`;
@@ -2257,10 +2267,12 @@
       }
 
       const { itemTypeId, slotIndex } = pendingTarget;
+      const coldBombId = ITEM_TYPES.coldBomb ? ITEM_TYPES.coldBomb.id : 0;
+      const magnetId = ITEM_TYPES.magnet ? ITEM_TYPES.magnet.id : 0;
       let ok = false;
-      if (itemTypeId === ITEM_TYPES.coldBomb.id) ok = useColdBombAt(x, y);
-      else if (itemTypeId === ITEM_TYPES.laser.id) ok = useLaserAt(x, y);
-      else if (itemTypeId === ITEM_TYPES.magnet.id) ok = useMagnetAt(x, y);
+      if (coldBombId && itemTypeId === coldBombId && typeof useColdBombAt === 'function') ok = useColdBombAt(x, y);
+      else if (itemTypeId === ITEM_TYPES.laser.id && typeof useLaserAt === 'function') ok = useLaserAt(x, y);
+      else if (magnetId && itemTypeId === magnetId) ok = useMagnetAt(x, y);
       else ok = false;
       if (!ok) return false;
 
@@ -2795,11 +2807,14 @@
           if (!meta) continue;
           const px = p.x * CELL + CELL / 2;
           const py = p.y * CELL + CELL / 2;
+          const coldBombId = ITEM_TYPES.coldBomb ? ITEM_TYPES.coldBomb.id : 0;
+          const defuseId = ITEM_TYPES.defuse ? ITEM_TYPES.defuse.id : 0;
+          const magnetId = ITEM_TYPES.magnet ? ITEM_TYPES.magnet.id : 0;
           let color = 'rgba(255,217,61,1)';
-          if (p.itemTypeId === ITEM_TYPES.coldBomb.id) color = 'rgba(255,107,107,1)';
-          if (p.itemTypeId === ITEM_TYPES.defuse.id) color = 'rgba(100,255,218,1)';
+          if (coldBombId && p.itemTypeId === coldBombId) color = 'rgba(255,107,107,1)';
+          if (defuseId && p.itemTypeId === defuseId) color = 'rgba(100,255,218,1)';
           if (p.itemTypeId === ITEM_TYPES.laser.id) color = 'rgba(107,203,255,1)';
-          if (p.itemTypeId === ITEM_TYPES.magnet.id) color = 'rgba(199,146,234,1)';
+          if (magnetId && p.itemTypeId === magnetId) color = 'rgba(199,146,234,1)';
           ctx.globalAlpha = 1;
           ctx.shadowColor = color;
           ctx.shadowBlur = 22;
