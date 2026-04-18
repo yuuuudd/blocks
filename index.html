@@ -255,7 +255,6 @@
         margin-left: 12px;
         margin-right: 12px;
         min-height: 44px;
-        bottom: 6px;
       }
     }
     #gameContainer {
@@ -349,10 +348,43 @@
     }
     .btn:active { transform: scale(0.95); }
     #overlay .btn {
-      position: sticky;
-      bottom: 12px;
       margin-top: 12px;
-      z-index: 25;
+    }
+    #deadOverlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(13, 17, 23, 0.38);
+      z-index: 23;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+    }
+    #deadCard {
+      width: min(380px, calc(100% - 20px));
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      padding: 14px;
+      color: #e6edf3;
+      text-align: center;
+    }
+    #deadTitle {
+      font-size: 16px;
+      font-weight: 900;
+      margin-bottom: 8px;
+      color: #ff6b6b;
+    }
+    #deadReason {
+      font-size: 12px;
+      color: rgba(230,237,243,0.75);
+      line-height: 1.5;
+    }
+    .deadRow {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
     }
     #pauseOverlay {
       position: absolute;
@@ -550,6 +582,14 @@
               </div>
             </div>
 
+            <div class="mode-section">
+              <label>权限</label>
+              <div class="mode-btns">
+                <button class="mode-btn" id="sensorPermBtn">开启重力</button>
+              </div>
+              <p class="subtitle" id="sensorPermTip" style="margin-bottom:0;">iPhone 需要手动开启重力权限</p>
+            </div>
+
             <button class="btn" id="startBtn">开始游戏</button>
           </div>
           <div id="pauseOverlay" class="hidden">
@@ -561,7 +601,25 @@
               </div>
               <div class="pauseRow">
                 <button class="pauseBtn" id="homeBtn">返回主页</button>
-                <button class="pauseBtn" id="settingsBtn">音效/震动</button>
+                <button class="pauseBtn" id="settingsBtn">设置</button>
+              </div>
+              <div class="pauseRow hidden" id="pauseSettingsRow">
+                <button class="pauseBtn" id="pauseSoundBtn">声音</button>
+                <button class="pauseBtn" id="pauseVibrateBtn">震动</button>
+              </div>
+            </div>
+          </div>
+          <div id="deadOverlay" class="hidden">
+            <div id="deadCard">
+              <div id="deadTitle">失败</div>
+              <div id="deadReason"></div>
+              <div class="deadRow">
+                <button class="pauseBtn primary" id="deadViewResultBtn">查看结果</button>
+                <button class="pauseBtn" id="deadRestartBtn">重新开始</button>
+              </div>
+              <div class="deadRow">
+                <button class="pauseBtn" id="deadHomeBtn">返回主页</button>
+                <button class="pauseBtn" id="deadCloseBtn">继续查看</button>
               </div>
             </div>
           </div>
@@ -718,6 +776,7 @@
     let gameState = 'idle';
     let tiltX = 0;
     let tiltY = 0;
+    const keyState = { left: false, right: false, up: false, down: false };
     let moveAccX = 0;
     let moveAccY = 0;
     let lastTime = 0;
@@ -744,8 +803,23 @@
     let audioUnlocked = false;
     let pendingBgmKind = '';
     let lastSfxAt = {};
-    let orientationListening = false;
-    let keyState = { left: false, right: false, up: false, down: false };
+    let tapDropBoostUntil = 0;
+    let orientationListenerAttached = false;
+    let sensorPermissionState = 'unknown';
+    let lastGameOverReason = '';
+
+    function applyKeyboardTilt() {
+      tiltX = (keyState.left ? -KEYBOARD_TILT_ANGLE : 0) + (keyState.right ? KEYBOARD_TILT_ANGLE : 0);
+      tiltY = (keyState.up ? -KEYBOARD_TILT_ANGLE : 0) + (keyState.down ? KEYBOARD_TILT_ANGLE : 0);
+    }
+
+    function resetKeyboardInput() {
+      keyState.left = false;
+      keyState.right = false;
+      keyState.up = false;
+      keyState.down = false;
+      applyKeyboardTilt();
+    }
 
     // ============== 初始化 ==============
     function init() {
@@ -753,6 +827,56 @@
       ctx = canvas.getContext('2d');
       document.getElementById('best').textContent = best;
       startOverlayHTML = document.getElementById('overlay').innerHTML;
+      window.addEventListener('error', e => {
+        const msg = (e && e.message) ? String(e.message) : '发生错误';
+        showToast(msg, '#ff6b6b', 1400);
+      });
+      window.addEventListener('unhandledrejection', e => {
+        const msg = (e && e.reason) ? String(e.reason) : '发生错误';
+        showToast(msg, '#ff6b6b', 1400);
+      });
+      canvas.addEventListener('click', e => {
+        if (gameState === 'dead') {
+          document.getElementById('deadOverlay').classList.remove('hidden');
+          e.preventDefault();
+          return;
+        }
+        if (!pendingTarget) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.floor((e.clientX - rect.left) / CELL);
+        const y = Math.floor((e.clientY - rect.top) / CELL);
+        usePendingItemAtCell(x, y);
+        e.preventDefault();
+      });
+      canvas.addEventListener('touchend', e => {
+        if (gameState === 'dead') {
+          document.getElementById('deadOverlay').classList.remove('hidden');
+          e.preventDefault();
+          return;
+        }
+        if (!pendingTarget) return;
+        const t = e.changedTouches && e.changedTouches[0];
+        if (!t) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.floor((t.clientX - rect.left) / CELL);
+        const y = Math.floor((t.clientY - rect.top) / CELL);
+        usePendingItemAtCell(x, y);
+        e.preventDefault();
+      }, { passive: false });
+
+      const overlay = document.getElementById('overlay');
+      overlay.addEventListener('click', e => {
+        const t = e.target;
+        if (!t || !t.id) return;
+        if (t.id === 'startBtn') { startGame(); e.preventDefault(); return; }
+        if (t.id === 'sensorPermBtn') { requestSensorPermission(); e.preventDefault(); return; }
+      });
+      overlay.addEventListener('touchend', e => {
+        const t = e.target;
+        if (!t || !t.id) return;
+        if (t.id === 'startBtn') { startGame(); e.preventDefault(); return; }
+        if (t.id === 'sensorPermBtn') { requestSensorPermission(); e.preventDefault(); return; }
+      }, { passive: false });
       document.getElementById('restartNowBtn').addEventListener('click', startGame);
       document.getElementById('restartNowBtn').addEventListener('touchend', e => { e.preventDefault(); startGame(); });
       document.getElementById('pauseBtn').addEventListener('click', togglePause);
@@ -764,13 +888,31 @@
       document.getElementById('homeBtn').addEventListener('click', goHome);
       document.getElementById('homeBtn').addEventListener('touchend', e => { e.preventDefault(); goHome(); });
       document.getElementById('settingsBtn').addEventListener('click', () => {
-        toggleSound();
-        toggleVibrate();
+        const row = document.getElementById('pauseSettingsRow');
+        if (row) row.classList.toggle('hidden');
       });
       document.getElementById('settingsBtn').addEventListener('touchend', e => {
         e.preventDefault();
-        toggleSound();
-        toggleVibrate();
+        const row = document.getElementById('pauseSettingsRow');
+        if (row) row.classList.toggle('hidden');
+      });
+      document.getElementById('pauseSoundBtn').addEventListener('click', toggleSound);
+      document.getElementById('pauseSoundBtn').addEventListener('touchend', e => { e.preventDefault(); toggleSound(); });
+      document.getElementById('pauseVibrateBtn').addEventListener('click', toggleVibrate);
+      document.getElementById('pauseVibrateBtn').addEventListener('touchend', e => { e.preventDefault(); toggleVibrate(); });
+
+      document.getElementById('deadViewResultBtn').addEventListener('click', showResultOverlay);
+      document.getElementById('deadViewResultBtn').addEventListener('touchend', e => { e.preventDefault(); showResultOverlay(); });
+      document.getElementById('deadRestartBtn').addEventListener('click', startGame);
+      document.getElementById('deadRestartBtn').addEventListener('touchend', e => { e.preventDefault(); startGame(); });
+      document.getElementById('deadHomeBtn').addEventListener('click', goHome);
+      document.getElementById('deadHomeBtn').addEventListener('touchend', e => { e.preventDefault(); goHome(); });
+      document.getElementById('deadCloseBtn').addEventListener('click', () => {
+        document.getElementById('deadOverlay').classList.add('hidden');
+      });
+      document.getElementById('deadCloseBtn').addEventListener('touchend', e => {
+        e.preventDefault();
+        document.getElementById('deadOverlay').classList.add('hidden');
       });
       document.getElementById('ruleBtn').addEventListener('click', toggleRulesPanel);
       document.getElementById('ruleBtn').addEventListener('touchend', e => { e.preventDefault(); toggleRulesPanel(); });
@@ -807,56 +949,30 @@
         if (e.key === 'ArrowUp')    { keyState.up = false;    applyKeyboardTilt(); }
         if (e.key === 'ArrowDown')  { keyState.down = false;  applyKeyboardTilt(); }
       });
-      window.addEventListener('blur', resetKeyboardInput);
+
+      if (window.PointerEvent) {
+        document.addEventListener('pointerdown', e => {
+          if (e.button !== undefined && e.button !== 0) return;
+          triggerTapDropBoost();
+        });
+      } else {
+        document.addEventListener('touchstart', () => triggerTapDropBoost(), { passive: true });
+        document.addEventListener('mousedown', e => {
+          if (e.button !== 0) return;
+          triggerTapDropBoost();
+        });
+      }
 
       // 陀螺仪
-      setupOrientationAccess();
+      if (window.DeviceOrientationEvent) {
+        initSensorPermissionState();
+        if (typeof DeviceOrientationEvent.requestPermission !== 'function') attachOrientationListener();
+      } else {
+        initSensorPermissionState();
+      }
 
       renderIdle();
       syncAudioState();
-    }
-
-    function applyKeyboardTilt() {
-      if (keyState.left === keyState.right) tiltX = 0;
-      else tiltX = keyState.left ? -KEYBOARD_TILT_ANGLE : KEYBOARD_TILT_ANGLE;
-
-      if (keyState.up === keyState.down) tiltY = 0;
-      else tiltY = keyState.up ? -KEYBOARD_TILT_ANGLE : KEYBOARD_TILT_ANGLE;
-    }
-
-    function resetKeyboardInput() {
-      keyState.left = false;
-      keyState.right = false;
-      keyState.up = false;
-      keyState.down = false;
-      tiltX = 0;
-      tiltY = 0;
-    }
-
-    function setupOrientationAccess() {
-      if (!window.DeviceOrientationEvent) return;
-      if (typeof DeviceOrientationEvent.requestPermission !== 'function') {
-        if (!orientationListening) {
-          window.addEventListener('deviceorientation', onOrient);
-          orientationListening = true;
-        }
-      }
-    }
-
-    async function requestOrientationPermission() {
-      if (!window.DeviceOrientationEvent) return;
-      if (orientationListening) return;
-      if (typeof DeviceOrientationEvent.requestPermission !== 'function') {
-        setupOrientationAccess();
-        return;
-      }
-      const perm = await DeviceOrientationEvent.requestPermission().catch(() => 'denied');
-      if (perm === 'granted') {
-        window.addEventListener('deviceorientation', onOrient);
-        orientationListening = true;
-      } else {
-        showToast('陀螺仪未授权，可再次点击开始重试', '#ffd93d', 1200);
-      }
     }
 
     function bindStartOverlay() {
@@ -864,7 +980,6 @@
       const modeGroup = ov.querySelector('#modeGroup');
       const sizeGroup = ov.querySelector('#sizeGroup');
       const diffGroup = ov.querySelector('#diffGroup');
-      const startBtn = ov.querySelector('#startBtn');
 
       if (modeGroup) {
         modeGroup.querySelectorAll('.mode-btn').forEach(btn => {
@@ -896,10 +1011,72 @@
           });
         });
       }
-      if (startBtn) {
-        startBtn.addEventListener('click', startGame);
-        startBtn.addEventListener('touchend', e => { e.preventDefault(); startGame(); });
+      updateSensorPermissionUI(ov);
+    }
+
+    function initSensorPermissionState() {
+      if (!window.DeviceOrientationEvent) {
+        sensorPermissionState = 'unsupported';
+        return;
       }
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        sensorPermissionState = 'needs_request';
+        return;
+      }
+      sensorPermissionState = 'granted';
+    }
+
+    function attachOrientationListener() {
+      if (orientationListenerAttached) return;
+      if (!window.DeviceOrientationEvent) return;
+      window.addEventListener('deviceorientation', onOrient);
+      orientationListenerAttached = true;
+    }
+
+    async function requestSensorPermission() {
+      if (!window.DeviceOrientationEvent) {
+        sensorPermissionState = 'unsupported';
+        updateSensorPermissionUI();
+        showToast('当前设备不支持重力感应', '#8b949e', 900);
+        return;
+      }
+      if (typeof DeviceOrientationEvent.requestPermission !== 'function') {
+        sensorPermissionState = 'granted';
+        attachOrientationListener();
+        updateSensorPermissionUI();
+        showToast('重力已开启', '#64ffda', 800);
+        return;
+      }
+      const perm = await DeviceOrientationEvent.requestPermission().catch(() => 'denied');
+      sensorPermissionState = perm === 'granted' ? 'granted' : 'denied';
+      if (sensorPermissionState === 'granted') attachOrientationListener();
+      updateSensorPermissionUI();
+      showToast(sensorPermissionState === 'granted' ? '重力权限已开启' : '重力权限被拒绝', sensorPermissionState === 'granted' ? '#64ffda' : '#ff6b6b', 900);
+    }
+
+    function updateSensorPermissionUI(root = document) {
+      const btn = root.querySelector('#sensorPermBtn');
+      const tip = root.querySelector('#sensorPermTip');
+      if (!btn) return;
+      if (sensorPermissionState === 'unsupported') {
+        btn.textContent = '不支持';
+        btn.disabled = true;
+        if (tip) tip.textContent = '当前设备不支持重力感应';
+        return;
+      }
+      btn.disabled = false;
+      if (sensorPermissionState === 'granted') {
+        btn.textContent = '重力已开启';
+        if (tip) tip.textContent = '已开启：倾斜手机控制';
+        return;
+      }
+      if (sensorPermissionState === 'denied') {
+        btn.textContent = '重新开启重力';
+        if (tip) tip.textContent = '权限被拒绝，可再次尝试开启';
+        return;
+      }
+      btn.textContent = '开启重力';
+      if (tip) tip.textContent = 'iPhone 需要点击此按钮授权';
     }
 
     function updateRestartVisibility() {
@@ -965,6 +1142,8 @@
       resetKeyboardInput();
       const po = document.getElementById('pauseOverlay');
       po.classList.add('hidden');
+      document.getElementById('deadOverlay').classList.add('hidden');
+      document.getElementById('pauseSettingsRow').classList.add('hidden');
       gameState = 'idle';
       piece = null;
       inventory = [];
@@ -988,7 +1167,7 @@
       el.classList.toggle('hidden');
       if (!el.classList.contains('hidden')) {
         el.innerHTML = `
-中心禁区：中心 3×3（10×10 为 1×1），占到就结束。<br>
+斩杀线：10×10 为中心 3×3 · 15×15 为 5×5 · 20×20 为 7×7，占到就结束。<br>
 均衡奖励：每放置 3 个方块检测一次，四边占领更均衡会额外加分。<br>
 道具模式：消除带字母格子获得道具；1-4 或点击道具槽使用。<br>
 得分倍率：简单 x${DIFF_CONFIG.easy.scoreMult} · 普通 x${DIFF_CONFIG.normal.scoreMult} · 困难 x${DIFF_CONFIG.hard.scoreMult}
@@ -1382,57 +1561,68 @@
 
     // ============== 开始 ==============
     function startGame() {
-      playSfx('start');
-      if (bgmSwitchTimer) {
-        clearTimeout(bgmSwitchTimer);
-        bgmSwitchTimer = null;
+      try {
+        playSfx('start');
+        if (bgmSwitchTimer) {
+          clearTimeout(bgmSwitchTimer);
+          bgmSwitchTimer = null;
+        }
+        requestOrientationPermission();
+        resetKeyboardInput();
+        const { maxW, maxH } = getCanvasBounds();
+        COLS = selectedSize;
+        ROWS = selectedSize;
+        CELL = Math.floor(Math.min(maxW / COLS, maxH / ROWS));
+        canvas.width  = COLS * CELL;
+        canvas.height = ROWS * CELL;
+        document.getElementById('gameContainer').style.width  = canvas.width  + 'px';
+        document.getElementById('gameContainer').style.height = canvas.height + 'px';
+
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('deadOverlay').classList.add('hidden');
+        document.getElementById('pauseSettingsRow').classList.add('hidden');
+        gameMode = selectedMode;
+        document.getElementById('modeLabel').textContent = `${COLS}×${ROWS} · ${GAME_MODE[gameMode].label} · ${DIFF_CONFIG[selectedDiff].label}`;
+
+        grid = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+        score = 0;
+        tiltX = 0; tiltY = 0;
+        moveAccX = 0; moveAccY = 0;
+        piecePlaced = 0;
+        inventory = [];
+        clears = 0;
+        maxFill = 0;
+        itemUseCount = 0;
+        metricsAcc = 0;
+        currentFillPct = 0;
+        worldPickups = [];
+        explosions = [];
+        particles = [];
+        scoreParts = { placement: 0, clear: 0, balance: 0, itemCollect: 0, itemUse: 0 };
+        document.getElementById('score').textContent = 0;
+        const clearsEl = document.getElementById('clears');
+        if (clearsEl) clearsEl.textContent = '0';
+        const fillEl = document.getElementById('fill');
+        if (fillEl) fillEl.textContent = '0%';
+        gameState = 'playing';
+        updateRestartVisibility();
+        updateInfoVisibility();
+        updatePauseVisibility();
+        updateSettingsButtons();
+        setPausedUI(false);
+        updateItemBar();
+        spawnPiece();
+        lastTime = performance.now();
+        syncAudioState();
+        requestAnimationFrame(loop);
+      } catch (err) {
+        showToast(err ? String(err) : '无法开始', '#ff6b6b', 1800);
+        throw err;
       }
-      requestOrientationPermission();
-      resetKeyboardInput();
-      const { maxW, maxH } = getCanvasBounds();
-      COLS = selectedSize;
-      ROWS = selectedSize;
-      CELL = Math.floor(Math.min(maxW / COLS, maxH / ROWS));
-      canvas.width  = COLS * CELL;
-      canvas.height = ROWS * CELL;
-      document.getElementById('gameContainer').style.width  = canvas.width  + 'px';
-      document.getElementById('gameContainer').style.height = canvas.height + 'px';
-
-      document.getElementById('overlay').classList.add('hidden');
-      gameMode = selectedMode;
-      document.getElementById('modeLabel').textContent = `${COLS}×${ROWS} · ${GAME_MODE[gameMode].label} · ${DIFF_CONFIG[selectedDiff].label}`;
-
-      grid = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
-      score = 0;
-      tiltX = 0; tiltY = 0;
-      moveAccX = 0; moveAccY = 0;
-      piecePlaced = 0;
-      inventory = [];
-      clears = 0;
-      maxFill = 0;
-      itemUseCount = 0;
-      metricsAcc = 0;
-      scoreParts = { placement: 0, clear: 0, balance: 0, itemCollect: 0, itemUse: 0 };
-      document.getElementById('score').textContent = 0;
-      const clearsEl = document.getElementById('clears');
-      if (clearsEl) clearsEl.textContent = '0';
-      const fillEl = document.getElementById('fill');
-      if (fillEl) fillEl.textContent = '0%';
-      gameState = 'playing';
-      updateRestartVisibility();
-      updateInfoVisibility();
-      updatePauseVisibility();
-      updateSettingsButtons();
-      setPausedUI(false);
-      updateItemBar();
-      spawnPiece();
-      lastTime = performance.now();
-      syncAudioState();
-      requestAnimationFrame(loop);
     }
 
     function getCanvasBounds() {
-      const base = 560;
+      const base = 680;
       let maxPx = Math.max(280, Math.min(base, window.innerWidth - 40, window.innerHeight - 120));
       if (window.innerWidth <= 760) {
         const reserved = gameState === 'playing' ? 300 : 180;
@@ -1499,11 +1689,78 @@
       if (fillEl) fillEl.textContent = `${pct}%`;
     }
 
+    function updateEffects(dt) {
+      for (let i = explosions.length - 1; i >= 0; i--) {
+        const ex = explosions[i];
+        ex.t += dt;
+        if (ex.t >= ex.maxT) explosions.splice(i, 1);
+      }
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.t += dt;
+        p.x += p.vx * (dt / 16.67) * CELL * 0.05;
+        p.y += p.vy * (dt / 16.67) * CELL * 0.05;
+        p.vx *= 0.985;
+        p.vy *= 0.985;
+        if (p.t >= p.life) particles.splice(i, 1);
+      }
+    }
+
     // ============== 更新（核心：下一步碰才停）==============
     function update(dt) {
       if (!piece) return;
 
       const speedMult = DIFF_CONFIG[selectedDiff].speedMult;
+      if (piece.isLitBomb) {
+        if (Math.abs(tiltX) >= MIN_ANGLE) {
+          const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(tiltX)));
+          const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * speedMult;
+          const interval = 1000 / Math.max(0.001, speed);
+          moveAccX += dt;
+          while (moveAccX >= interval) {
+            moveAccX -= interval;
+            const dx = tiltX < 0 ? -1 : 1;
+            const nx = piece.x + dx;
+            if (!outOfBounds(nx, piece.y, piece.shape) && !overlapsGrid(nx, piece.y, piece.shape)) {
+              piece.x = nx;
+              playSfx('move');
+            }
+          }
+        } else {
+          moveAccX = 0;
+        }
+
+        if (Math.abs(tiltY) >= MIN_ANGLE) {
+          const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(tiltY)));
+          const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * speedMult;
+          const interval = 1000 / Math.max(0.001, speed);
+          moveAccY += dt;
+          while (moveAccY >= interval) {
+            moveAccY -= interval;
+            const dy = tiltY < 0 ? -1 : 1;
+            const ny = piece.y + dy;
+            if (!outOfBounds(piece.x, ny, piece.shape) && !overlapsGrid(piece.x, ny, piece.shape)) {
+              piece.y = ny;
+              playSfx('move');
+            }
+          }
+        } else {
+          moveAccY = 0;
+        }
+
+        const now = performance.now();
+        if (now >= piece.bombEndsAt) {
+          const { x: cx, y: cy } = getPieceCenterCell(piece);
+          piece = null;
+          explode3x3(cx, cy, true);
+          const removed = checkLines();
+          if (gameState !== 'playing') return;
+          applyBalanceReward(removed);
+          maybeSpawnWorldPickup();
+          spawnPiece();
+        }
+        return;
+      }
 
       // X方向
       if (Math.abs(tiltX) >= MIN_ANGLE) {
@@ -1552,7 +1809,10 @@
         settlePiece();
         if (gameState !== 'playing') return;
         const removed = checkLines();
+        if (gameState !== 'playing') return;
         applyBalanceReward(removed);
+        maybeSpawnWorldPickup();
+        if (maybeSpawnLitBombEvent()) return;
         spawnPiece();
       }
     }
@@ -1607,8 +1867,9 @@
     }
 
     function centerRadius() {
-      if (COLS <= 10) return 0;
-      return 1;
+      if (COLS <= 10) return 1;
+      if (COLS <= 15) return 2;
+      return 3;
     }
 
     function isInCenterZone(x, y) {
@@ -1616,6 +1877,25 @@
       const cx = Math.floor((COLS - 1) / 2);
       const cy = Math.floor((ROWS - 1) / 2);
       return Math.abs(x - cx) <= r && Math.abs(y - cy) <= r;
+    }
+
+    function isKillZoneOccupied() {
+      const r = centerRadius();
+      const cx = Math.floor((COLS - 1) / 2);
+      const cy = Math.floor((ROWS - 1) / 2);
+      for (let y = cy - r; y <= cy + r; y++) {
+        for (let x = cx - r; x <= cx + r; x++) {
+          if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
+          if (grid[y][x]) return true;
+        }
+      }
+      return false;
+    }
+
+    function failIfKillZoneOccupied() {
+      if (!isKillZoneOccupied()) return false;
+      gameOver('斩杀线被占');
+      return true;
     }
 
     function showToast(text, color = '#ffd93d', ms = 900) {
@@ -1630,6 +1910,178 @@
       }, ms);
     }
 
+    function getPickupCap() {
+      if (COLS <= 10) return 1;
+      if (COLS <= 15) return 2;
+      return 3;
+    }
+
+    function getPickupRollProb(fillPct) {
+      if (fillPct < 30) return 0.15;
+      if (fillPct < 45) return 0.30;
+      if (fillPct < 60) return 0.45;
+      return 0.60;
+    }
+
+    function getLitBombProb(fillPct) {
+      if (fillPct < 30) return 0.08;
+      if (fillPct < 45) return 0.14;
+      if (fillPct < 60) return 0.20;
+      return 0.28;
+    }
+
+    function getCenterCell() {
+      return { x: Math.floor((COLS - 1) / 2), y: Math.floor((ROWS - 1) / 2) };
+    }
+
+    function getPieceCenterCell(p) {
+      if (!p || !p.shape || p.shape.length === 0) return getCenterCell();
+      let sx = 0, sy = 0;
+      for (const [px, py] of p.shape) {
+        sx += p.x + px;
+        sy += p.y + py;
+      }
+      return {
+        x: Math.max(0, Math.min(COLS - 1, Math.round(sx / p.shape.length))),
+        y: Math.max(0, Math.min(ROWS - 1, Math.round(sy / p.shape.length))),
+      };
+    }
+
+    function findEmptyCellNearCenter() {
+      const { x: cx, y: cy } = getCenterCell();
+      if (!grid[cy][cx] && !isInCenterZone(cx, cy)) return { x: cx, y: cy };
+      const maxR = Math.max(COLS, ROWS);
+      for (let r = 0; r <= maxR; r++) {
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dx = -r; dx <= r; dx++) {
+            const x = cx + dx;
+            const y = cy + dy;
+            if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
+            if (isInCenterZone(x, y)) continue;
+            if (grid[y][x]) continue;
+            const exists = worldPickups.some(p => p.x === x && p.y === y);
+            if (exists) continue;
+            return { x, y };
+          }
+        }
+      }
+      return null;
+    }
+
+    function maybeSpawnWorldPickup() {
+      if (gameMode !== 'items') return;
+      const cap = getPickupCap();
+      if (worldPickups.length >= cap) return;
+      if (piecePlaced === 0) return;
+      if (piecePlaced % WORLD_PICKUP_TRIGGER_EVERY !== 0) return;
+      if (Math.random() > getPickupRollProb(currentFillPct)) return;
+      spawnWorldPickup();
+    }
+
+    function spawnWorldPickup() {
+      const spot = findEmptyCellNearCenter();
+      if (!spot) return;
+      const entry = weightedPick(ITEM_LIST, e => e.weight);
+      worldPickups.push({ x: spot.x, y: spot.y, itemTypeId: entry.type.id });
+    }
+
+    function maybeSpawnLitBombEvent() {
+      if (gameMode !== 'items') return false;
+      if (piece && piece.isLitBomb) return false;
+      if (piecePlaced === 0) return false;
+      if (piecePlaced % LIT_BOMB_TRIGGER_EVERY !== 0) return false;
+      if (Math.random() > getLitBombProb(currentFillPct)) return false;
+      const { x: cx, y: cy } = getCenterCell();
+      const bomb = { x: cx, y: cy, color: 0, shape: [[0,0]], itemTypeId: 0, itemIndex: -1, isLitBomb: true, bombEndsAt: performance.now() + LIT_BOMB_MS };
+      if (overlapsGrid(bomb.x, bomb.y, bomb.shape)) {
+        explode3x3(cx, cy, true);
+        spawnPiece();
+        return true;
+      }
+      piece = bomb;
+      showToast('点燃炸弹出现！', '#ff6b6b', 650);
+      playSfx('itemUse');
+      return true;
+    }
+
+    function pushInventory(itemTypeId, toastText = '') {
+      if (inventory.length >= INVENTORY_SIZE) {
+        const removed = inventory.shift();
+        const removedMeta = removed ? getItemById(removed) : null;
+        const removedName = removedMeta ? removedMeta.icon : '';
+        showToast(`背包已满：替换最早道具 ${removedName}`, '#ffd93d');
+      }
+      inventory.push(itemTypeId);
+      updateItemBar();
+      if (toastText) showToast(toastText, '#ffd93d');
+    }
+
+    function collectWorldPickupAt(x, y) {
+      if (gameMode !== 'items') return false;
+      const idx = worldPickups.findIndex(p => p.x === x && p.y === y);
+      if (idx < 0) return false;
+      const p = worldPickups[idx];
+      worldPickups.splice(idx, 1);
+      pushInventory(p.itemTypeId);
+      playSfx('itemCollect');
+      addScorePart('itemCollect', ITEM_SCORES.collect, `获得道具 +${ITEM_SCORES.collect}`, '#ffd93d');
+      return true;
+    }
+
+    function collectPickupsForCurrentPiece() {
+      if (gameMode !== 'items') return;
+      if (!piece) return;
+      if (pendingTarget) return;
+      if (piece.isLitBomb) return;
+      for (const [px, py] of piece.shape) {
+        const wx = piece.x + px;
+        const wy = piece.y + py;
+        if (wx < 0 || wx >= COLS || wy < 0 || wy >= ROWS) continue;
+        if (collectWorldPickupAt(wx, wy)) return;
+      }
+    }
+
+    function explode3x3(cx, cy, isLit) {
+      let cleared = 0;
+      const removedPickups = [];
+      for (let y = cy - 1; y <= cy + 1; y++) {
+        for (let x = cx - 1; x <= cx + 1; x++) {
+          if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
+          const cell = grid[y][x];
+          if (cell) {
+            grid[y][x] = 0;
+            cleared += 1;
+          }
+          for (let i = worldPickups.length - 1; i >= 0; i--) {
+            const p = worldPickups[i];
+            if (p.x === x && p.y === y) {
+              removedPickups.push(worldPickups[i]);
+              worldPickups.splice(i, 1);
+            }
+          }
+        }
+      }
+
+      const scorePer = isLit ? ITEM_SCORES.litBombPerCell : ITEM_SCORES.coldBombPerCell;
+      if (cleared > 0) addScorePart('itemUse', cleared * scorePer, isLit ? `爆炸 +${cleared * scorePer}` : `小炸弹 +${cleared * scorePer}`, '#ff6b6b');
+
+      const ex = { x: cx, y: cy, t: 0, maxT: 520, isLit };
+      explosions.push(ex);
+      for (let i = 0; i < 44; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const sp = 0.7 + Math.random() * 2.2;
+        particles.push({
+          x: (cx + 0.5) * CELL,
+          y: (cy + 0.5) * CELL,
+          vx: Math.cos(ang) * sp,
+          vy: Math.sin(ang) * sp,
+          life: 520 + Math.random() * 220,
+          t: 0,
+          size: 1.6 + Math.random() * 2.8,
+        });
+      }
+      vibrate(isLit ? [18, 30, 18] : 18);
+    }
     function collectItem(itemTypeId) {
       if (gameMode !== 'items') return;
       if (inventory.length >= INVENTORY_SIZE) {
@@ -1713,6 +2165,85 @@
       addScorePart('itemUse', cleared * ITEM_SCORES.laserPerCell, `激光 +${cleared * ITEM_SCORES.laserPerCell}`, '#6bcbff');
       const removed = checkLines();
       applyBalanceReward(removed);
+      playSfx('itemUse');
+      return true;
+    }
+
+    function useMagnetAt(tx, ty) {
+      const radius = 2;
+      const coords = [];
+      for (let y = Math.max(0, ty - radius); y <= Math.min(ROWS - 1, ty + radius); y++) {
+        for (let x = Math.max(0, tx - radius); x <= Math.min(COLS - 1, tx + radius); x++) {
+          if (!grid[y][x]) continue;
+          const dist = Math.abs(tx - x) + Math.abs(ty - y);
+          coords.push({ x, y, dist });
+        }
+      }
+      coords.sort((a, b) => b.dist - a.dist);
+      let moved = 0;
+      for (const c of coords) {
+        const v = grid[c.y][c.x];
+        if (!v) continue;
+        const dx = tx === c.x ? 0 : (tx > c.x ? 1 : -1);
+        const dy = ty === c.y ? 0 : (ty > c.y ? 1 : -1);
+        let nx = c.x;
+        let ny = c.y;
+        if (Math.abs(tx - c.x) >= Math.abs(ty - c.y)) nx = c.x + dx;
+        else ny = c.y + dy;
+        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
+        if (grid[ny][nx]) continue;
+        grid[ny][nx] = v;
+        grid[c.y][c.x] = 0;
+        moved += 1;
+      }
+      if (ITEM_SCORES.magnet) addScorePart('itemUse', ITEM_SCORES.magnet, `磁铁 +${ITEM_SCORES.magnet}`, '#64ffda');
+      showToast(moved > 0 ? '磁吸！' : '磁铁无效', '#64ffda', 650);
+      const removed = checkLines();
+      applyBalanceReward(removed);
+      playSfx('itemUse');
+      return true;
+    }
+
+    function isPickupCell(x, y) {
+      return worldPickups.some(p => p.x === x && p.y === y);
+    }
+
+    function usePendingItemAtCell(x, y) {
+      if (!pendingTarget) return false;
+      if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return false;
+      if (grid[y][x] !== 0) {
+        showToast('请选择空格', '#ffd93d', 700);
+        return false;
+      }
+      if (isPickupCell(x, y)) {
+        showToast('该格有拾取点', '#ffd93d', 700);
+        return false;
+      }
+      if (isInCenterZone(x, y)) {
+        showToast('斩杀线不可用', '#ff6b6b', 700);
+        return false;
+      }
+
+      const { itemTypeId, slotIndex } = pendingTarget;
+      let ok = false;
+      if (itemTypeId === ITEM_TYPES.coldBomb.id) ok = useColdBombAt(x, y);
+      else if (itemTypeId === ITEM_TYPES.laser.id) ok = useLaserAt(x, y);
+      else if (itemTypeId === ITEM_TYPES.magnet.id) ok = useMagnetAt(x, y);
+      else ok = false;
+      if (!ok) return false;
+
+      const realId = inventory[slotIndex];
+      if (realId !== itemTypeId) {
+        const idx = inventory.findIndex(v => v === itemTypeId);
+        if (idx >= 0) inventory.splice(idx, 1);
+      } else {
+        inventory.splice(slotIndex, 1);
+      }
+      updateItemBar();
+      itemUseCount += 1;
+      pendingTarget = null;
+      updateItemBar();
+      return true;
     }
 
     function useClean() {
@@ -1835,7 +2366,7 @@
         const wx = piece.x + px, wy = piece.y + py;
         if (wx >= 0 && wx < COLS && wy >= 0 && wy < ROWS) {
           if (isInCenterZone(wx, wy)) {
-            gameOver('中心被占');
+            gameOver('斩杀线被占');
             return;
           }
           const itemTypeId = (gameMode === 'items' && piece.itemTypeId && i === piece.itemIndex) ? piece.itemTypeId : 0;
@@ -1852,6 +2383,7 @@
     // ============== 消除行列 ==============
     function checkLines() {
       let removed = 0;
+      if (failIfKillZoneOccupied()) return 0;
 
       function rowFull(y) {
         return grid[y].every(c => c !== 0);
@@ -1964,6 +2496,7 @@
 
         const stepCount = rowsToClear.length + colsToClear.length;
         removed += stepCount;
+        if (failIfKillZoneOccupied()) return removed;
       }
 
       if (removed > 0) {
@@ -2184,22 +2717,43 @@
 
     // ============== 游戏结束 ==============
     function gameOver(reason = '') {
-      gameState = 'over';
+      if (gameState === 'dead') return;
+      lastGameOverReason = reason || '';
+      gameState = 'dead';
       playSfx('gameOver');
       updateRestartVisibility();
       updateInfoVisibility();
       updatePauseVisibility();
       setPausedUI(false);
+      pendingTarget = null;
       if (score > best) {
         best = score;
         localStorage.setItem('grav_best', best);
         document.getElementById('best').textContent = best;
       }
+      updateItemBar();
+      const po = document.getElementById('pauseOverlay');
+      po.classList.add('hidden');
       const ov = document.getElementById('overlay');
-      const reasonHtml = reason ? `<p class="subtitle">${reason}</p>` : '';
+      ov.classList.add('hidden');
+      const d = document.getElementById('deadOverlay');
+      const reasonEl = document.getElementById('deadReason');
+      if (reasonEl) reasonEl.textContent = lastGameOverReason ? `原因：${lastGameOverReason}` : '';
+      d.classList.remove('hidden');
+      syncAudioState();
+    }
+
+    function showResultOverlay() {
+      if (gameState !== 'dead') return;
+      const ov = document.getElementById('overlay');
       const mult = DIFF_CONFIG[selectedDiff].scoreMult || 1.0;
       const parts = scoreParts || {};
-      const summary = `
+      const reasonHtml = lastGameOverReason ? `<p class="subtitle">${lastGameOverReason}</p>` : '';
+      ov.innerHTML = `
+        <h1>结果</h1>
+        <div id="finalScore">${score}</div>
+        <p class="subtitle">最高分: ${best}</p>
+        ${reasonHtml}
         <div class="mode-section">
           <label>得分组成 (倍率 x${mult})</label>
           <p class="subtitle" style="margin-bottom:10px;">
@@ -2208,68 +2762,22 @@
             消除总数: ${clears} · 最高充满: ${maxFill}% · 道具使用次数: ${itemUseCount}
           </p>
         </div>
-      `;
-      ov.innerHTML = `
-        <h1>游戏结束</h1>
-        <div id="finalScore">${score}</div>
-        <p class="subtitle">最高分: ${best}</p>
-        ${reasonHtml}
-        ${summary}
-        <div class="mode-section">
-          <label>模式</label>
-          <div class="mode-btns" id="modeGroup2">
-            <button class="mode-btn ${selectedMode==='normal'?'active':''}" data-mode="normal">普通</button>
-            <button class="mode-btn ${selectedMode==='items'?'active':''}" data-mode="items">道具</button>
-          </div>
-        </div>
-        <div class="mode-section">
-          <label>画布大小</label>
-          <div class="mode-btns" id="sizeGroup2">
-            <button class="mode-btn ${selectedSize===10?'active':''}" data-size="10">10×10</button>
-            <button class="mode-btn ${selectedSize===15?'active':''}" data-size="15">15×15</button>
-            <button class="mode-btn ${selectedSize===20?'active':''}" data-size="20">20×20</button>
-          </div>
-        </div>
-        <div class="mode-section">
-          <label>难度</label>
-          <div class="mode-btns" id="diffGroup2">
-            <button class="mode-btn ${selectedDiff==='easy'?'active':''}" data-diff="easy">简单</button>
-            <button class="mode-btn ${selectedDiff==='normal'?'active':''}" data-diff="normal">普通</button>
-            <button class="mode-btn ${selectedDiff==='hard'?'active':''}" data-diff="hard">困难</button>
-          </div>
-        </div>
-        <button class="btn" id="restartBtn">再来一局</button>
-      `;
+        <button class="btn" id="closeResultBtn">关闭结果</button>
+      `.trim();
+      const closeBtn = ov.querySelector('#closeResultBtn');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          ov.classList.add('hidden');
+          document.getElementById('deadOverlay').classList.remove('hidden');
+        });
+        closeBtn.addEventListener('touchend', e => {
+          e.preventDefault();
+          ov.classList.add('hidden');
+          document.getElementById('deadOverlay').classList.remove('hidden');
+        });
+      }
+      document.getElementById('deadOverlay').classList.add('hidden');
       ov.classList.remove('hidden');
-      if (bgmSwitchTimer) clearTimeout(bgmSwitchTimer);
-      bgmSwitchTimer = setTimeout(() => {
-        syncAudioState();
-        bgmSwitchTimer = null;
-      }, 260);
-      updateItemBar();
-      document.querySelectorAll('#modeGroup2 .mode-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          document.querySelectorAll('#modeGroup2 .mode-btn').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          selectedMode = btn.dataset.mode;
-        });
-      });
-      document.querySelectorAll('#sizeGroup2 .mode-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          document.querySelectorAll('#sizeGroup2 .mode-btn').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          selectedSize = parseInt(btn.dataset.size);
-        });
-      });
-      document.querySelectorAll('#diffGroup2 .mode-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          document.querySelectorAll('#diffGroup2 .mode-btn').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          selectedDiff = btn.dataset.diff;
-        });
-      });
-      document.getElementById('restartBtn').addEventListener('click', startGame);
-      document.getElementById('restartBtn').addEventListener('touchend', e => { e.preventDefault(); startGame(); });
     }
 
     window.addEventListener('load', init);
