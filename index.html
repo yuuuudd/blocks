@@ -824,6 +824,7 @@
     let pendingTargetPulseT = 0;
     let currentFillPct = 0;
     let audioUnlocked = false;
+    let bgmPrimed = false;
     let pendingBgmKind = '';
     let lastSfxAt = {};
     let orientationListenerAttached = false;
@@ -1285,7 +1286,29 @@
       ensureBgmTracks();
       ensureAudioRunning();
       if (!soundOn) return;
+      if (!bgmPrimed) primeBgmTracks();
       syncAudioState();
+    }
+
+    function primeBgmTracks() {
+      if (bgmPrimed) return;
+      bgmPrimed = true;
+      ensureBgmTracks();
+      const srcs = [menuBgm, gameBgm, deathBgm]
+        .map(t => (t && (t.currentSrc || t.src)) || '')
+        .filter(Boolean);
+      for (const src of srcs) {
+        const ghost = new Audio(src);
+        ghost.preload = 'auto';
+        ghost.muted = true;
+        ghost.playsInline = true;
+        const p = ghost.play();
+        if (p && typeof p.then === 'function') {
+          p.then(() => {
+            ghost.pause();
+          }).catch(() => {});
+        }
+      }
     }
 
     function createNoiseBuffer(ctx, duration = 0.2) {
@@ -1409,24 +1432,51 @@
       }
     }
 
+    function createBgmTrack(paths) {
+      const track = new Audio(paths[0]);
+      track.loop = true;
+      track.preload = 'auto';
+      track.volume = BGM_VOLUME;
+      track.playsInline = true;
+      let idx = 0;
+      const tryFallback = () => {
+        if (idx >= paths.length - 1) return;
+        const wasPlaying = !track.paused;
+        idx += 1;
+        track.src = paths[idx];
+        track.load();
+        if (wasPlaying && soundOn && audioUnlocked) {
+          track.play().catch(() => {});
+        }
+      };
+      track.addEventListener('error', tryFallback);
+      return track;
+    }
+
     function ensureBgmTracks() {
       if (!menuBgm) {
-        menuBgm = new Audio('Assets/Audio/EnumBGM.mp3');
-        menuBgm.loop = true;
-        menuBgm.preload = 'auto';
-        menuBgm.volume = BGM_VOLUME;
+        menuBgm = createBgmTrack([
+          'Assets/Audio/EnumBGM.mp3',
+          'Assets/Audio/Enum.mp3',
+          'Assets/EnumBGM.mp3',
+          'Assets/Enum.mp3',
+        ]);
       }
       if (!gameBgm) {
-        gameBgm = new Audio('Assets/Audio/MainBGM.mp3');
-        gameBgm.loop = true;
-        gameBgm.preload = 'auto';
-        gameBgm.volume = BGM_VOLUME;
+        gameBgm = createBgmTrack([
+          'Assets/Audio/MainBGM.mp3',
+          'Assets/Audio/Main.mp3',
+          'Assets/MainBGM.mp3',
+          'Assets/Main.mp3',
+        ]);
       }
       if (!deathBgm) {
-        deathBgm = new Audio('Assets/Audio/DeathBGM.mp3');
-        deathBgm.loop = true;
-        deathBgm.preload = 'auto';
-        deathBgm.volume = BGM_VOLUME;
+        deathBgm = createBgmTrack([
+          'Assets/Audio/DeathBGM.mp3',
+          'Assets/Audio/Death.mp3',
+          'Assets/DeathBGM.mp3',
+          'Assets/Death.mp3',
+        ]);
       }
     }
 
@@ -1461,16 +1511,27 @@
         if (!p || typeof p.catch !== 'function') return;
         p.catch(() => {
           pendingBgmKind = kind;
-          const ctx = ensureAudioContext();
-          if (!ctx) return;
-          if (ctx.state === 'running') return;
-          ctx.resume().then(() => {
+          next.addEventListener('canplaythrough', () => {
+            if (!soundOn || !audioUnlocked) return;
+            if (pendingBgmKind && pendingBgmKind !== kind) return;
+            const retryWhenReady = next.play();
+            if (retryWhenReady && typeof retryWhenReady.catch === 'function') {
+              retryWhenReady.then(() => { pendingBgmKind = ''; }).catch(() => {});
+            }
+          }, { once: true });
+          const retryPlay = () => {
             const retry = next.play();
             if (retry && typeof retry.catch === 'function') {
               retry.then(() => { pendingBgmKind = ''; }).catch(() => {});
-            } else {
-              pendingBgmKind = '';
             }
+          };
+          const ctx = ensureAudioContext();
+          if (!ctx || ctx.state === 'running') {
+            retryPlay();
+            return;
+          }
+          ctx.resume().then(() => {
+            retryPlay();
           }).catch(() => {});
         });
       };
