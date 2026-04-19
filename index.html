@@ -44,8 +44,10 @@
     #gamePanel {
       flex: 1 1 auto;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      gap: 10px;
       min-width: 0;
     }
     #infoPanel {
@@ -496,14 +498,30 @@
     #toast.show {
       opacity: 1;
     }
-    #itemBar {
+    #scoreFloat {
       position: absolute;
-      left: 50%;
-      bottom: 30px;
-      transform: translateX(-50%);
+      top: 10px;
+      left: 10px;
+      z-index: 16;
+      pointer-events: none;
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(13, 17, 23, 0.55);
+      color: rgba(230,237,243,0.86);
+      font-size: 11px;
+      line-height: 1.55;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      white-space: pre-line;
+      max-width: min(240px, calc(100vw - 24px));
+    }
+    #itemBar {
       display: flex;
+      justify-content: center;
       gap: 10px;
-      z-index: 15;
+      margin-top: 10px;
+      z-index: 5;
       pointer-events: auto;
     }
     .item-slot {
@@ -545,6 +563,55 @@
       justify-content: center;
       pointer-events: none;
     }
+    #rulesModal {
+      position: fixed;
+      inset: 0;
+      background: rgba(13, 17, 23, 0.62);
+      z-index: 120;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    #rulesCard {
+      width: min(560px, calc(100vw - 24px));
+      max-height: min(78vh, 720px);
+      overflow: auto;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(13,17,23,0.96);
+      color: #e6edf3;
+      padding: 14px;
+      box-shadow: 0 16px 36px rgba(0,0,0,0.45);
+    }
+    #rulesHead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    #rulesTitle {
+      font-size: 16px;
+      font-weight: 900;
+      color: #ffd93d;
+    }
+    #rulesCloseBtn {
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.08);
+      color: #e6edf3;
+      border-radius: 10px;
+      height: 34px;
+      padding: 0 12px;
+      cursor: pointer;
+      font-weight: 800;
+    }
+    #rulesBody {
+      font-size: 13px;
+      line-height: 1.7;
+      color: rgba(230,237,243,0.92);
+      white-space: pre-line;
+    }
   </style>
 </head>
 <body>
@@ -569,7 +636,7 @@
               <label>画布大小</label>
               <div class="mode-btns" id="sizeGroup">
                 <button class="mode-btn" data-size="10">10×10</button>
-                <button class="mode-btn active" data-size="15">15×15</button>
+                <button class="mode-btn active" data-size="14">14×14</button>
                 <button class="mode-btn" data-size="20">20×20</button>
               </div>
             </div>
@@ -587,6 +654,7 @@
               <label>权限</label>
               <div class="mode-btns">
                 <button class="mode-btn" id="sensorPermBtn">开启重力</button>
+                <button class="mode-btn" id="startRulesBtn">查看规则</button>
               </div>
               <p class="subtitle" id="sensorPermTip" style="margin-bottom:0;">iPhone 需要手动开启重力权限</p>
             </div>
@@ -626,8 +694,9 @@
           </div>
           <div id="hint">📱 倾斜手机 / ⌨️ 方向键</div>
           <div id="toast"></div>
-          <div id="itemBar" class="hidden"></div>
+          <div id="scoreFloat" class="hidden"></div>
         </div>
+        <div id="itemBar" class="hidden"></div>
       </div>
 
       <div id="infoPanel" class="hidden">
@@ -672,6 +741,15 @@
       </div>
     </div>
   </div>
+  <div id="rulesModal" class="hidden">
+    <div id="rulesCard">
+      <div id="rulesHead">
+        <div id="rulesTitle">游戏规则</div>
+        <button id="rulesCloseBtn">关闭</button>
+      </div>
+      <div id="rulesBody"></div>
+    </div>
+  </div>
 
   <script>
     const COLORS = ['#ff6b6b', '#64ffda', '#ffd93d', '#6bcbff', '#c792ea', '#ff9f43'];
@@ -682,14 +760,18 @@
 
     // 角度 → 每格移动间隔(ms)：30度=500ms(2格/s)，15度=1000ms
     // interval = 15000 / |angle|
-    const MIN_ANGLE = 5;
+    const MIN_ANGLE = 2;
     const MAX_ANGLE = 75;
     const MAX_SPEED_CELLS_PER_SEC = 5;
+    const TILT_DEADZONE = 2;
+    const MOVE_CURVE_EXP = 1.6;
+    const MOVE_SMOOTH_MS = 80;
+    const SETTLE_DELAY_MS = 360;
 
     // 难度配置：speedMult 越大移动越快
     const DIFF_CONFIG = {
-      easy:   { label: '简单', speedMult: 0.6, scoreMult: 0.9 },
-      normal: { label: '普通', speedMult: 1.0, scoreMult: 1.0 },
+      easy:   { label: '简单', speedMult: 0.8, scoreMult: 0.9 },
+      normal: { label: '普通', speedMult: 1.2, scoreMult: 1.0 },
       hard:   { label: '困难', speedMult: 2.0, scoreMult: 1.15 },
     };
 
@@ -723,20 +805,18 @@
     ];
 
     const ITEM_TYPES = {
-      bomb:  { id: 1, icon: '💣', label: 'B' },
-      fill:  { id: 2, icon: '🛠️', label: 'F' },
-      laser: { id: 3, icon: '⚡', label: 'L' },
-      clean: { id: 4, icon: '🧹', label: 'C' },
-      single:{ id: 5, icon: '📦', label: '1' },
-      shuffle:{ id: 6, icon: '🔀', label: 'S' },
+      fill:   { id: 1, icon: '🧱', label: 'F' },
+      bomb:   { id: 2, icon: '💣', label: 'B' },
+      laser:  { id: 3, icon: '⚡', label: 'L' },
+      defuse: { id: 4, icon: '🗜️', label: 'D' },
     };
+    const ITEM_BY_ID = {};
+    for (const k of Object.keys(ITEM_TYPES)) ITEM_BY_ID[ITEM_TYPES[k].id] = ITEM_TYPES[k];
     const ITEM_LIST = [
+      { type: ITEM_TYPES.fill, weight: 60 },
       { type: ITEM_TYPES.bomb, weight: 18 },
-      { type: ITEM_TYPES.fill, weight: 18 },
-      { type: ITEM_TYPES.laser, weight: 16 },
-      { type: ITEM_TYPES.clean, weight: 14 },
-      { type: ITEM_TYPES.shuffle, weight: 12 },
-      { type: ITEM_TYPES.single, weight: 10 },
+      { type: ITEM_TYPES.laser, weight: 14 },
+      { type: ITEM_TYPES.defuse, weight: 8 },
     ];
     const ITEM_OFFSET = 100;
     const ITEM_SCORES = {
@@ -750,7 +830,7 @@
       shuffle: 100,
       magnet: 100,
     };
-    const WORLD_PICKUP_TRIGGER_EVERY = 3;
+    const WORLD_PICKUP_TRIGGER_EVERY = 2;
     const LIT_BOMB_TRIGGER_EVERY = 6;
     const LIT_BOMB_MS = 3000;
     const INVENTORY_SIZE = 4;
@@ -787,7 +867,7 @@
     let moveAccX = 0;
     let moveAccY = 0;
     let lastTime = 0;
-    let selectedSize = 15;
+    let selectedSize = 14;
     let selectedDiff = 'easy';
     let selectedMode = 'normal';
     let gameMode = 'normal';
@@ -805,23 +885,38 @@
     let audioCtx = null;
     let menuBgm = null;
     let gameBgm = null;
+    let deathBgm = null;
     let activeBgm = '';
     let bgmSwitchTimer = null;
     let worldPickups = [];
     let explosions = [];
     let particles = [];
     let lineFlashes = [];
+    let landBounces = [];
+    let flyItems = [];
+    let aimCell = null;
+    let screenShake = { t: 0, maxT: 0, amp: 0 };
+    let screenFlash = { t: 0, maxT: 0, color: 'rgba(0,0,0,0)' };
+    let comboPop = { t: 0, maxT: 0, text: '' };
+    let scoreFloatOn = false;
     let pendingTarget = null;
     let pendingTargetPulseT = 0;
     let currentFillPct = 0;
-    let audioUnlocked = false;
+    let audioUnlocked = true;
+    let bgmPrimed = false;
     let pendingBgmKind = '';
     let lastSfxAt = {};
     let orientationListenerAttached = false;
     let sensorPermissionState = 'unknown';
     let lastGameOverReason = '';
+    let pausedByRules = false;
 
     function applyKeyboardTilt() {
+      if (pendingTarget) {
+        tiltX = 0;
+        tiltY = 0;
+        return;
+      }
       tiltX = (keyState.left ? -KEYBOARD_TILT_ANGLE : 0) + (keyState.right ? KEYBOARD_TILT_ANGLE : 0);
       tiltY = (keyState.up ? -KEYBOARD_TILT_ANGLE : 0) + (keyState.down ? KEYBOARD_TILT_ANGLE : 0);
     }
@@ -834,36 +929,12 @@
       applyKeyboardTilt();
     }
 
-    function shouldSuppressErrorMessage(msg) {
-      const s = String(msg || '').toLowerCase();
-      if (!s) return true;
-      if (s === 'script error.') return true;
-      if (s.includes('resizeobserver')) return true;
-      if (s.includes('passive event listener')) return true;
-      if (s.includes('unable to preventdefault')) return true;
-      if (s.includes('aborterror')) return true;
-      if (s.includes('the operation was aborted')) return true;
-      if (s.includes('networkerror')) return true;
-      if (s.includes('load failed')) return true;
-      return false;
-    }
-
     // ============== 初始化 ==============
     function init() {
       canvas = document.getElementById('gameCanvas');
       ctx = canvas.getContext('2d');
       document.getElementById('best').textContent = best;
       startOverlayHTML = document.getElementById('overlay').innerHTML;
-      window.addEventListener('error', e => {
-        const msg = (e && e.message) ? String(e.message) : '发生错误';
-        if (shouldSuppressErrorMessage(msg)) return;
-        showToast(msg, '#ff6b6b', 1400);
-      });
-      window.addEventListener('unhandledrejection', e => {
-        const msg = (e && e.reason) ? String(e.reason) : '发生错误';
-        if (shouldSuppressErrorMessage(msg)) return;
-        showToast(msg, '#ff6b6b', 1400);
-      });
       canvas.addEventListener('click', e => {
         if (gameState === 'dead') {
           document.getElementById('deadOverlay').classList.remove('hidden');
@@ -893,18 +964,36 @@
         e.preventDefault();
       }, { passive: false });
 
+      const updateAimFromClient = (clientX, clientY) => {
+        if (!pendingTarget) { aimCell = null; return; }
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.floor((clientX - rect.left) / CELL);
+        const y = Math.floor((clientY - rect.top) / CELL);
+        const valid = isUsableCellForItem(pendingTarget.itemTypeId, x, y);
+        aimCell = { x, y, valid };
+      };
+      canvas.addEventListener('mousemove', e => updateAimFromClient(e.clientX, e.clientY));
+      canvas.addEventListener('touchmove', e => {
+        if (!pendingTarget) return;
+        const t = e.touches && e.touches[0];
+        if (!t) return;
+        updateAimFromClient(t.clientX, t.clientY);
+      }, { passive: true });
+
       const overlay = document.getElementById('overlay');
       overlay.addEventListener('click', e => {
         const t = e.target;
         if (!t || !t.id) return;
         if (t.id === 'startBtn') { startGame(); e.preventDefault(); return; }
         if (t.id === 'sensorPermBtn') { requestSensorPermission(); e.preventDefault(); return; }
+        if (t.id === 'startRulesBtn') { toggleRulesPanel(); e.preventDefault(); return; }
       });
       overlay.addEventListener('touchend', e => {
         const t = e.target;
         if (!t || !t.id) return;
         if (t.id === 'startBtn') { startGame(); e.preventDefault(); return; }
         if (t.id === 'sensorPermBtn') { requestSensorPermission(); e.preventDefault(); return; }
+        if (t.id === 'startRulesBtn') { toggleRulesPanel(); e.preventDefault(); return; }
       }, { passive: false });
       document.getElementById('restartNowBtn').addEventListener('click', startGame);
       document.getElementById('restartNowBtn').addEventListener('touchend', e => { e.preventDefault(); startGame(); });
@@ -945,6 +1034,11 @@
       });
       document.getElementById('ruleBtn').addEventListener('click', toggleRulesPanel);
       document.getElementById('ruleBtn').addEventListener('touchend', e => { e.preventDefault(); toggleRulesPanel(); });
+      document.getElementById('rulesCloseBtn').addEventListener('click', closeRulesModal);
+      document.getElementById('rulesCloseBtn').addEventListener('touchend', e => { e.preventDefault(); closeRulesModal(); });
+      document.getElementById('rulesModal').addEventListener('click', e => {
+        if (e.target && e.target.id === 'rulesModal') closeRulesModal();
+      });
       document.getElementById('scoreBtn').addEventListener('click', toggleScorePanel);
       document.getElementById('scoreBtn').addEventListener('touchend', e => { e.preventDefault(); toggleScorePanel(); });
       document.getElementById('soundBtn').addEventListener('click', toggleSound);
@@ -953,9 +1047,10 @@
       document.getElementById('vibrateBtn').addEventListener('touchend', e => { e.preventDefault(); toggleVibrate(); });
 
       const unlockOnce = () => unlockAudioFromGesture();
-      document.body.addEventListener('touchstart', unlockOnce, { once: true, passive: true });
-      document.body.addEventListener('pointerdown', unlockOnce, { once: true });
-      document.body.addEventListener('click', unlockOnce, { once: true });
+      document.body.addEventListener('touchstart', unlockOnce, { passive: true });
+      document.body.addEventListener('touchend', unlockOnce, { passive: true });
+      document.body.addEventListener('pointerdown', unlockOnce);
+      document.body.addEventListener('click', unlockOnce);
 
       bindStartOverlay();
       updateSettingsButtons();
@@ -988,7 +1083,25 @@
       }
 
       renderIdle();
+      ensureBgmTracks();
+      if (!bgmPrimed) primeBgmTracks();
       syncAudioState();
+
+      // 自动播放补偿：移动端预览页常在初次加载时拦截，页面可见后再尝试一次
+      setTimeout(() => { if (soundOn) syncAudioState(); }, 220);
+      setTimeout(() => { if (soundOn) syncAudioState(); }, 1200);
+      window.addEventListener('pageshow', () => { if (soundOn) syncAudioState(); });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && soundOn) syncAudioState();
+      });
+      document.addEventListener('WeixinJSBridgeReady', () => {
+        audioUnlocked = true;
+        if (soundOn) syncAudioState();
+      });
+      document.addEventListener('YixinJSBridgeReady', () => {
+        audioUnlocked = true;
+        if (soundOn) syncAudioState();
+      });
     }
 
     function bindStartOverlay() {
@@ -1136,6 +1249,31 @@
       }
     }
 
+    function pauseForRules() {
+      if (gameState !== 'playing') return;
+      pausedByRules = true;
+      gameState = 'paused';
+      setPausedUI(false);
+      updateRestartVisibility();
+      updatePauseVisibility();
+      updateInfoVisibility();
+      updateItemBar();
+    }
+
+    function resumeFromRules() {
+      if (!pausedByRules) return;
+      if (gameState !== 'paused') { pausedByRules = false; return; }
+      pausedByRules = false;
+      gameState = 'playing';
+      setPausedUI(false);
+      updateRestartVisibility();
+      updatePauseVisibility();
+      updateInfoVisibility();
+      updateItemBar();
+      lastTime = performance.now();
+      requestAnimationFrame(loop);
+    }
+
     function resumeGame() {
       if (gameState !== 'paused') return;
       playSfx('resume');
@@ -1178,39 +1316,70 @@
     }
 
     function toggleRulesPanel() {
-      const el = document.getElementById('panelRules');
-      if (!el) return;
-      el.classList.toggle('hidden');
-      if (!el.classList.contains('hidden')) {
-        el.innerHTML = `
-斩杀线：10×10 为中心 3×3 · 15×15 为 5×5 · 20×20 为 7×7，占到就结束。<br>
-均衡奖励：每放置 3 个方块检测一次，四边占领更均衡会额外加分。<br>
-道具模式：消除带字母格子获得道具；1-4 或点击道具槽使用。<br>
-得分倍率：简单 x${DIFF_CONFIG.easy.scoreMult} · 普通 x${DIFF_CONFIG.normal.scoreMult} · 困难 x${DIFF_CONFIG.hard.scoreMult}
+      const modal = document.getElementById('rulesModal');
+      const body = document.getElementById('rulesBody');
+      if (!modal || !body) return;
+      const willOpen = modal.classList.contains('hidden');
+      if (willOpen) {
+        pauseForRules();
+        body.textContent = `
+【目标】
+尽量消除整行/整列并生存更久，避免斩杀线被占。
+
+【移动与失败】
+倾斜手机（或方向键）控制方块滑行；倾斜越大速度越快。
+方块碰到边缘/已固定方块后，短暂缓冲才会固定。
+斩杀线：10×10 为中心2×2，14×14为4×4，20×20为8×8；固定方块进入即失败。
+
+【道具模式】
+背包最多 ${INVENTORY_SIZE} 个，点击道具后会高亮可用格子，再点格子释放。
+🧱 填补：在目标空格填1格。
+💣 炸弹：以目标空格为中心炸3×3。
+⚡ 十字激光：清除目标格所在整行和整列。
+🗜️ 拆弹钳：点燃炸弹出现时可拆除，并获得1个💣进背包。
+
+【点燃炸弹事件】
+事件触发后，点燃炸弹从正中央生成，可在3秒内移动；到时在当前位置爆炸3×3。
+
+【得分】
+得分由：放置分 + 消除分 + 均衡分 + 道具获得/使用分组成。
+难度只影响倍率与速度：简单x${DIFF_CONFIG.easy.scoreMult}，普通x${DIFF_CONFIG.normal.scoreMult}，困难x${DIFF_CONFIG.hard.scoreMult}。
         `.trim();
+        modal.classList.remove('hidden');
+      } else {
+        closeRulesModal();
       }
+    }
+
+    function closeRulesModal() {
+      const modal = document.getElementById('rulesModal');
+      if (!modal || modal.classList.contains('hidden')) return;
+      modal.classList.add('hidden');
+      resumeFromRules();
     }
 
     function toggleScorePanel() {
+      scoreFloatOn = !scoreFloatOn;
       const el = document.getElementById('panelScore');
-      if (!el) return;
-      el.classList.toggle('hidden');
-      if (!el.classList.contains('hidden')) {
-        refreshScorePanel();
-      }
+      if (el) el.classList.add('hidden');
+      refreshScorePanel();
     }
 
     function refreshScorePanel() {
-      const el = document.getElementById('panelScore');
-      if (!el || el.classList.contains('hidden')) return;
       const parts = scoreParts || {};
       const mult = DIFF_CONFIG[selectedDiff].scoreMult || 1.0;
-      el.innerHTML = `
-倍率 x${mult}<br>
-消除：${parts.clear || 0} · 放置：${parts.placement || 0} · 均衡：${parts.balance || 0}<br>
-道具获得：${parts.itemCollect || 0} · 道具使用：${parts.itemUse || 0}<br>
-消除总数：${clears} · 当前充满：${document.getElementById('fill')?.textContent || '0%'} · 最高充满：${maxFill}% · 道具使用：${itemUseCount}
+      const txt = `
+得分 ${score} · 倍率 x${mult}
+消除 ${parts.clear || 0} · 放置 ${parts.placement || 0} · 均衡 ${parts.balance || 0}
+道具 获得 ${parts.itemCollect || 0} · 使用 ${parts.itemUse || 0}
+消除数 ${clears} · 充满 ${document.getElementById('fill')?.textContent || '0%'} · 最高 ${maxFill}% · 道具使用 ${itemUseCount}
       `.trim();
+      const floatEl = document.getElementById('scoreFloat');
+      if (floatEl) {
+        const show = scoreFloatOn && gameState !== 'idle';
+        floatEl.classList.toggle('hidden', !show);
+        if (show) floatEl.textContent = txt;
+      }
     }
 
     function updateSettingsButtons() {
@@ -1256,14 +1425,43 @@
     }
 
     function unlockAudioFromGesture() {
-      if (audioUnlocked) return;
-      audioUnlocked = true;
+      if (!audioUnlocked) audioUnlocked = true;
       ensureBgmTracks();
-      ensureAudioRunning();
+      try { ensureAudioRunning(); } catch (_) {}
       if (!soundOn) return;
-      const kind = pendingBgmKind || (gameState === 'playing' ? 'game' : 'menu');
-      pendingBgmKind = '';
-      playBgm(kind);
+      if (!bgmPrimed) primeBgmTracks();
+      syncAudioState();
+    }
+
+    function primeBgmTracks() {
+      if (bgmPrimed) return;
+      bgmPrimed = true;
+      ensureBgmTracks();
+      const tracks = [menuBgm, gameBgm, deathBgm];
+      for (const t of tracks) {
+        if (!t) continue;
+        const wasPlaying = !t.paused;
+        const prevMuted = t.muted;
+        t.muted = true;
+        const p = t.play();
+        if (p && typeof p.then === 'function') {
+          p.then(() => {
+            if (!wasPlaying) {
+              t.pause();
+              try { t.currentTime = 0; } catch (_) {}
+            }
+            t.muted = prevMuted;
+          }).catch(() => {
+            t.muted = prevMuted;
+          });
+        } else {
+          if (!wasPlaying) {
+            t.pause();
+            try { t.currentTime = 0; } catch (_) {}
+          }
+          t.muted = prevMuted;
+        }
+      }
     }
 
     function createNoiseBuffer(ctx, duration = 0.2) {
@@ -1387,19 +1585,58 @@
       }
     }
 
+    function createBgmTrack(paths) {
+      const track = new Audio(paths[0]);
+      track.loop = true;
+      track.preload = 'auto';
+      track.volume = BGM_VOLUME;
+      track.playsInline = true;
+      let idx = 0;
+      const tryFallback = () => {
+        if (idx >= paths.length - 1) return;
+        const wasPlaying = !track.paused;
+        idx += 1;
+        track.src = paths[idx];
+        track.load();
+        if (wasPlaying && soundOn && audioUnlocked) {
+          track.play().catch(() => {});
+        }
+      };
+      track.addEventListener('error', tryFallback);
+      return track;
+    }
+
     function ensureBgmTracks() {
       if (!menuBgm) {
-        menuBgm = new Audio('Assets/Audio/Enum.mp3');
-        menuBgm.loop = true;
-        menuBgm.preload = 'auto';
-        menuBgm.volume = BGM_VOLUME;
+        menuBgm = createBgmTrack([
+          'Assets/Audio/EnumBGM.mp3',
+          'Assets/Audio/Enum.mp3',
+          'Assets/EnumBGM.mp3',
+          'Assets/Enum.mp3',
+        ]);
       }
       if (!gameBgm) {
-        gameBgm = new Audio('Assets/Audio/Main.mp3');
-        gameBgm.loop = true;
-        gameBgm.preload = 'auto';
-        gameBgm.volume = BGM_VOLUME;
+        gameBgm = createBgmTrack([
+          'Assets/Audio/MainBGM.mp3',
+          'Assets/Audio/Main.mp3',
+          'Assets/MainBGM.mp3',
+          'Assets/Main.mp3',
+        ]);
       }
+      if (!deathBgm) {
+        deathBgm = createBgmTrack([
+          'Assets/Audio/DeathBGM.mp3',
+          'Assets/Audio/Death.mp3',
+          'Assets/DeathBGM.mp3',
+          'Assets/Death.mp3',
+        ]);
+      }
+    }
+
+    function getBgmTrack(kind) {
+      if (kind === 'game') return gameBgm;
+      if (kind === 'death') return deathBgm;
+      return menuBgm;
     }
 
     function pauseBgm(track) {
@@ -1410,21 +1647,81 @@
 
     function playBgm(kind) {
       ensureBgmTracks();
-      const next = kind === 'game' ? gameBgm : menuBgm;
-      const prev = activeBgm === 'game' ? gameBgm : activeBgm === 'menu' ? menuBgm : null;
+      const next = getBgmTrack(kind);
+      const prev = activeBgm ? getBgmTrack(activeBgm) : null;
       if (prev && prev !== next) pauseBgm(prev);
       activeBgm = kind;
       if (!soundOn) return;
-      if (!audioUnlocked) {
-        pendingBgmKind = kind;
-        return;
-      }
-      ensureAudioRunning();
-      if (next.paused) {
-        next.currentTime = 0;
-        next.play().catch(() => {
-          pendingBgmKind = kind;
+      if (!audioUnlocked) audioUnlocked = true;
+
+      const retryMutedAutoplay = () => {
+        const prevMuted = next.muted;
+        next.muted = true;
+        try { next.currentTime = 0; } catch (_) {}
+        const mutedPlay = next.play();
+        if (!mutedPlay || typeof mutedPlay.then !== 'function') {
+          setTimeout(() => {
+            next.muted = prevMuted;
+            if (!next.paused) {
+              next.volume = BGM_VOLUME;
+              pendingBgmKind = '';
+            }
+          }, 140);
+          return;
+        }
+        mutedPlay.then(() => {
+          next.muted = prevMuted;
+          next.volume = BGM_VOLUME;
+          pendingBgmKind = '';
+        }).catch(() => {
+          next.muted = prevMuted;
         });
+      };
+
+      const tryPlay = () => {
+        if (!next.paused) return;
+        try { next.currentTime = 0; } catch (_) {}
+        const p = next.play();
+        if (!p || typeof p.catch !== 'function') {
+          setTimeout(() => {
+            if (next.paused) retryMutedAutoplay();
+          }, 120);
+          return;
+        }
+        p.catch(() => {
+          pendingBgmKind = kind;
+          next.addEventListener('canplaythrough', () => {
+            if (!soundOn) return;
+            if (pendingBgmKind && pendingBgmKind !== kind) return;
+            const retryWhenReady = next.play();
+            if (retryWhenReady && typeof retryWhenReady.catch === 'function') {
+              retryWhenReady.then(() => { pendingBgmKind = ''; }).catch(() => {
+                retryMutedAutoplay();
+              });
+            }
+          }, { once: true });
+          const retryPlay = () => {
+            const retry = next.play();
+            if (retry && typeof retry.catch === 'function') {
+              retry.then(() => { pendingBgmKind = ''; }).catch(() => {
+                retryMutedAutoplay();
+              });
+            }
+          };
+          const ctx = ensureAudioContext();
+          if (!ctx || ctx.state === 'running') {
+            retryPlay();
+            return;
+          }
+          ctx.resume().then(() => {
+            retryPlay();
+          }).catch(() => {});
+        });
+      };
+
+      try { ensureAudioRunning(); } catch (_) {}
+      if (next.paused) {
+        tryPlay();
       }
     }
 
@@ -1432,6 +1729,7 @@
       ensureBgmTracks();
       pauseBgm(menuBgm);
       pauseBgm(gameBgm);
+      pauseBgm(deathBgm);
       activeBgm = '';
     }
 
@@ -1442,6 +1740,10 @@
       }
       if (gameState === 'playing') {
         playBgm('game');
+        return;
+      }
+      if (gameState === 'dead') {
+        playBgm('death');
         return;
       }
       playBgm('menu');
@@ -1460,9 +1762,15 @@
     }
 
     function getItemSpawnRate() {
-      if (selectedDiff === 'easy') return 0.14;
-      if (selectedDiff === 'hard') return 0.10;
-      return 0.12;
+      if (selectedDiff === 'easy') return 0.55;
+      if (selectedDiff === 'hard') return 0.35;
+      return 0.45;
+    }
+
+    function getPickupDiffMult() {
+      if (selectedDiff === 'easy') return 1.10;
+      if (selectedDiff === 'hard') return 0.90;
+      return 1.00;
     }
 
     function encodeCell(colorIndex1, itemTypeId = 0) {
@@ -1481,10 +1789,7 @@
     }
 
     function getItemById(id) {
-      for (const entry of ITEM_LIST) {
-        if (entry.type.id === id) return entry.type;
-      }
-      return null;
+      return ITEM_BY_ID[id] || null;
     }
 
     function updateItemBar() {
@@ -1545,6 +1850,7 @@
       score += points;
       scoreParts[part] = (scoreParts[part] || 0) + points;
       document.getElementById('score').textContent = score;
+      if (scoreFloatOn) refreshScorePanel();
       if (toastText) showToast(toastText, toastColor);
       if (showDelta) showScoreDelta(points);
       bumpScore();
@@ -1554,6 +1860,11 @@
 
     function onOrient(e) {
       if (gameState !== 'playing') return;
+      if (pendingTarget) {
+        tiltX = 0;
+        tiltY = 0;
+        return;
+      }
       const gx = e.gamma || 0;
       const gy = e.beta  || 0;
       tiltX = Math.max(-MAX_ANGLE, Math.min(MAX_ANGLE, gx));
@@ -1689,7 +2000,7 @@
         itemTypeId = entry.type.id;
         itemIndex = Math.floor(Math.random() * shape.length);
       }
-      piece = { x: cx, y: cy, color, shape, itemTypeId, itemIndex };
+      piece = { x: cx, y: cy, renderX: cx, renderY: cy, blockedMs: 0, color, shape, itemTypeId, itemIndex };
 
       if (overlapsGrid(piece.x, piece.y, piece.shape)) {
         gameOver();
@@ -1738,6 +2049,28 @@
         lf.t += dt;
         if (lf.t >= lf.maxT) lineFlashes.splice(i, 1);
       }
+      for (let i = landBounces.length - 1; i >= 0; i--) {
+        const b = landBounces[i];
+        b.t += dt;
+        if (b.t >= b.maxT) landBounces.splice(i, 1);
+      }
+      for (let i = flyItems.length - 1; i >= 0; i--) {
+        const f = flyItems[i];
+        f.t += dt;
+        if (f.t >= f.maxT) flyItems.splice(i, 1);
+      }
+      if (screenShake.maxT > 0) {
+        screenShake.t += dt;
+        if (screenShake.t >= screenShake.maxT) screenShake = { t: 0, maxT: 0, amp: 0 };
+      }
+      if (screenFlash.maxT > 0) {
+        screenFlash.t += dt;
+        if (screenFlash.t >= screenFlash.maxT) screenFlash = { t: 0, maxT: 0, color: 'rgba(0,0,0,0)' };
+      }
+      if (comboPop.maxT > 0) {
+        comboPop.t += dt;
+        if (comboPop.t >= comboPop.maxT) comboPop = { t: 0, maxT: 0, text: '' };
+      }
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.t += dt;
@@ -1749,46 +2082,67 @@
       }
     }
 
+    function triggerShake(amp = 8, ms = 180) {
+      screenShake = { t: 0, maxT: ms, amp: amp };
+    }
+
+    function triggerFlash(color = 'rgba(100,255,218,0.18)', ms = 140) {
+      screenFlash = { t: 0, maxT: ms, color };
+    }
+
+    function smoothFollow(current, target, dt, smoothMs) {
+      const k = 1 - Math.exp(-dt / Math.max(1, smoothMs));
+      return current + (target - current) * k;
+    }
+
+    function tiltToSpeed(absTilt, speedMult) {
+      const a = Math.max(0, Math.min(MAX_ANGLE, absTilt));
+      const norm = Math.max(0, (a - TILT_DEADZONE) / Math.max(1, (MAX_ANGLE - TILT_DEADZONE)));
+      const curved = Math.pow(norm, MOVE_CURVE_EXP);
+      return curved * MAX_SPEED_CELLS_PER_SEC * speedMult;
+    }
+
     // ============== 更新（核心：下一步碰才停）==============
     function update(dt) {
       if (!piece) return;
+      if (piece.renderX === undefined) piece.renderX = piece.x;
+      if (piece.renderY === undefined) piece.renderY = piece.y;
+      piece.renderX = smoothFollow(piece.renderX, piece.x, dt, MOVE_SMOOTH_MS);
+      piece.renderY = smoothFollow(piece.renderY, piece.y, dt, MOVE_SMOOTH_MS);
+      if (piece.blockedMs === undefined) piece.blockedMs = 0;
 
       const speedMult = DIFF_CONFIG[selectedDiff].speedMult;
+      const ax = Math.abs(tiltX);
+      const ay = Math.abs(tiltY);
+      const sx = tiltToSpeed(ax, speedMult);
+      const sy = tiltToSpeed(ay, speedMult);
+      const hasX = sx > 0.001;
+      const hasY = sy > 0.001;
       if (piece.isLitBomb) {
-        if (Math.abs(tiltX) >= MIN_ANGLE) {
-          const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(tiltX)));
-          const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * speedMult;
-          const interval = 1000 / Math.max(0.001, speed);
-          moveAccX += dt;
-          while (moveAccX >= interval) {
-            moveAccX -= interval;
-            const dx = tiltX < 0 ? -1 : 1;
-            const nx = piece.x + dx;
-            if (!outOfBounds(nx, piece.y, piece.shape) && !overlapsGrid(nx, piece.y, piece.shape)) {
-              piece.x = nx;
-              playSfx('move');
-            }
+        moveAccX += (hasX ? (sx * dt) / 1000 : 0);
+        while (moveAccX >= 1) {
+          moveAccX -= 1;
+          const dx = tiltX < 0 ? -1 : 1;
+          const nx = piece.x + dx;
+          if (!outOfBounds(nx, piece.y, piece.shape) && !overlapsGrid(nx, piece.y, piece.shape)) {
+            piece.x = nx;
+            playSfx('move');
+          } else {
+            break;
           }
-        } else {
-          moveAccX = 0;
         }
 
-        if (Math.abs(tiltY) >= MIN_ANGLE) {
-          const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(tiltY)));
-          const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * speedMult;
-          const interval = 1000 / Math.max(0.001, speed);
-          moveAccY += dt;
-          while (moveAccY >= interval) {
-            moveAccY -= interval;
-            const dy = tiltY < 0 ? -1 : 1;
-            const ny = piece.y + dy;
-            if (!outOfBounds(piece.x, ny, piece.shape) && !overlapsGrid(piece.x, ny, piece.shape)) {
-              piece.y = ny;
-              playSfx('move');
-            }
+        moveAccY += (hasY ? (sy * dt) / 1000 : 0);
+        while (moveAccY >= 1) {
+          moveAccY -= 1;
+          const dy = tiltY < 0 ? -1 : 1;
+          const ny = piece.y + dy;
+          if (!outOfBounds(piece.x, ny, piece.shape) && !overlapsGrid(piece.x, ny, piece.shape)) {
+            piece.y = ny;
+            playSfx('move');
+          } else {
+            break;
           }
-        } else {
-          moveAccY = 0;
         }
 
         const now = performance.now();
@@ -1805,50 +2159,45 @@
         return;
       }
 
-      // X方向
-      if (Math.abs(tiltX) >= MIN_ANGLE) {
-        const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(tiltX)));
-        const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * speedMult;
-        const interval = 1000 / Math.max(0.001, speed);
-        moveAccX += dt;
-        while (moveAccX >= interval) {
-          moveAccX -= interval;
-          const dx = tiltX < 0 ? -1 : 1;
-          const nx = piece.x + dx;
-          // 下一格是否可以移动（不出界、不碰物）
-          if (!outOfBounds(nx, piece.y, piece.shape) && !overlapsGrid(nx, piece.y, piece.shape)) {
-            piece.x = nx;
-            playSfx('move');
+      let moved = false;
+      const primary = (sx >= sy) ? 'x' : 'y';
+      const order = primary === 'x' ? ['x', 'y'] : ['y', 'x'];
+      for (const axis of order) {
+        if (axis === 'x') {
+          moveAccX += (hasX ? (sx * dt) / 1000 : 0);
+          while (moveAccX >= 1) {
+            moveAccX -= 1;
+            const dx = tiltX < 0 ? -1 : 1;
+            const nx = piece.x + dx;
+            if (!outOfBounds(nx, piece.y, piece.shape) && !overlapsGrid(nx, piece.y, piece.shape)) {
+              piece.x = nx;
+              moved = true;
+              playSfx('move');
+            } else {
+              break;
+            }
           }
-          // 如果下一格就已经是停止条件（无法继续该方向），则停下
-          // 注意：不需要额外处理，方块保持在当前格不动，但不锁定
-        }
-      } else {
-        moveAccX = 0;
-      }
-
-      // Y方向
-      if (Math.abs(tiltY) >= MIN_ANGLE) {
-        const clamped = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, Math.abs(tiltY)));
-        const speed = (clamped / MAX_ANGLE) * MAX_SPEED_CELLS_PER_SEC * speedMult;
-        const interval = 1000 / Math.max(0.001, speed);
-        moveAccY += dt;
-        while (moveAccY >= interval) {
-          moveAccY -= interval;
-          const dy = tiltY < 0 ? -1 : 1;
-          const ny = piece.y + dy;
-          if (!outOfBounds(piece.x, ny, piece.shape) && !overlapsGrid(piece.x, ny, piece.shape)) {
-            piece.y = ny;
-            playSfx('move');
+        } else {
+          moveAccY += (hasY ? (sy * dt) / 1000 : 0);
+          while (moveAccY >= 1) {
+            moveAccY -= 1;
+            const dy = tiltY < 0 ? -1 : 1;
+            const ny = piece.y + dy;
+            if (!outOfBounds(piece.x, ny, piece.shape) && !overlapsGrid(piece.x, ny, piece.shape)) {
+              piece.y = ny;
+              moved = true;
+              playSfx('move');
+            } else {
+              break;
+            }
           }
         }
-      } else {
-        moveAccY = 0;
       }
+      collectPickupsForCurrentPiece();
 
       // 锁定判定：
       // 当且仅当 倾斜方向的"下一格"是墙/方块 时，才锁定（固定当前方块）
-      if (shouldSettle()) {
+      if (shouldSettle(dt, moved)) {
         settlePiece();
         if (gameState !== 'playing') return;
         const removed = checkLines();
@@ -1861,37 +2210,42 @@
     }
 
     // 判定是否需要固定：所有正在倾斜的方向的下一格都被阻挡
-    function shouldSettle() {
-      const hasX = Math.abs(tiltX) >= MIN_ANGLE;
-      const hasY = Math.abs(tiltY) >= MIN_ANGLE;
-
-      // 不倾斜 → 不固定
-      if (!hasX && !hasY) return false;
-
-      let xBlocked = false;
-      let yBlocked = false;
-
-      if (hasX) {
-        const dx = tiltX < 0 ? -1 : 1;
-        const nx = piece.x + dx;
-        xBlocked = outOfBounds(nx, piece.y, piece.shape) || overlapsGrid(nx, piece.y, piece.shape);
+    function shouldSettle(dt, moved) {
+      const activeX = Math.abs(tiltX) >= MIN_ANGLE;
+      const activeY = Math.abs(tiltY) >= MIN_ANGLE;
+      if (!activeX && !activeY) {
+        piece.blockedMs = 0;
+        return false;
       }
-      if (hasY) {
-        const dy = tiltY < 0 ? -1 : 1;
-        const ny = piece.y + dy;
-        yBlocked = outOfBounds(piece.x, ny, piece.shape) || overlapsGrid(piece.x, ny, piece.shape);
+      if (moved) {
+        piece.blockedMs = 0;
+        return false;
       }
 
-      // 双轴输入时按主倾斜轴判定，避免轻微抖动导致“永不固定”。
-      if (hasX && hasY) {
-        const ax = Math.abs(tiltX);
-        const ay = Math.abs(tiltY);
-        if (Math.abs(ax - ay) <= 4) return xBlocked || yBlocked;
-        return ax > ay ? xBlocked : yBlocked;
+      const dx = tiltX < 0 ? -1 : 1;
+      const dy = tiltY < 0 ? -1 : 1;
+      const xBlocked = activeX ? (outOfBounds(piece.x + dx, piece.y, piece.shape) || overlapsGrid(piece.x + dx, piece.y, piece.shape)) : false;
+      const yBlocked = activeY ? (outOfBounds(piece.x, piece.y + dy, piece.shape) || overlapsGrid(piece.x, piece.y + dy, piece.shape)) : false;
+
+      // 双轴倾斜时：主轴优先，接近等幅时任一阻挡即可固定，降低传感器抖动导致的漏判。
+      const ax = Math.abs(tiltX);
+      const ay = Math.abs(tiltY);
+      let settleCond = false;
+      if (activeX && activeY) {
+        if (Math.abs(ax - ay) <= 4) settleCond = xBlocked || yBlocked;
+        else settleCond = ax > ay ? xBlocked : yBlocked;
+      } else if (activeX) {
+        settleCond = xBlocked;
+      } else {
+        settleCond = yBlocked;
       }
-      if (hasX) return xBlocked;
-      if (hasY) return yBlocked;
-      return false;
+
+      if (!settleCond) {
+        piece.blockedMs = 0;
+        return false;
+      }
+      piece.blockedMs += dt;
+      return piece.blockedMs >= SETTLE_DELAY_MS;
     }
 
     // ============== 边界/重叠检查 ==============
@@ -1914,24 +2268,31 @@
     }
 
     function centerRadius() {
-      if (COLS <= 10) return 1;
-      if (COLS <= 15) return 2;
-      return 3;
+      return Math.floor((getKillZoneSize() - 1) / 2);
+    }
+
+    function getKillZoneSize() {
+      if (COLS <= 10) return 2;
+      if (COLS <= 14) return 4;
+      return 8;
+    }
+
+    function getKillZoneBounds() {
+      const s = getKillZoneSize();
+      const x0 = Math.floor((COLS - s) / 2);
+      const y0 = Math.floor((ROWS - s) / 2);
+      return { x0, y0, x1: x0 + s, y1: y0 + s, s };
     }
 
     function isInCenterZone(x, y) {
-      const r = centerRadius();
-      const cx = Math.floor((COLS - 1) / 2);
-      const cy = Math.floor((ROWS - 1) / 2);
-      return Math.abs(x - cx) <= r && Math.abs(y - cy) <= r;
+      const { x0, y0, x1, y1 } = getKillZoneBounds();
+      return x >= x0 && x < x1 && y >= y0 && y < y1;
     }
 
     function isKillZoneOccupied() {
-      const r = centerRadius();
-      const cx = Math.floor((COLS - 1) / 2);
-      const cy = Math.floor((ROWS - 1) / 2);
-      for (let y = cy - r; y <= cy + r; y++) {
-        for (let x = cx - r; x <= cx + r; x++) {
+      const { x0, y0, x1, y1 } = getKillZoneBounds();
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
           if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
           if (grid[y][x]) return true;
         }
@@ -1958,16 +2319,18 @@
     }
 
     function getPickupCap() {
-      if (COLS <= 10) return 1;
-      if (COLS <= 15) return 2;
-      return 3;
+      if (COLS <= 10) return 2;
+      if (COLS <= 14) return 3;
+      return 4;
     }
 
     function getPickupRollProb(fillPct) {
-      if (fillPct < 30) return 0.15;
-      if (fillPct < 45) return 0.30;
-      if (fillPct < 60) return 0.45;
-      return 0.60;
+      let base = 0.75;
+      if (fillPct < 30) base = 0.75;
+      else if (fillPct < 45) base = 0.86;
+      else if (fillPct < 60) base = 0.94;
+      else base = 0.98;
+      return Math.max(0, Math.min(1, base * getPickupDiffMult()));
     }
 
     function getLitBombProb(fillPct) {
@@ -1978,7 +2341,7 @@
     }
 
     function getCenterCell() {
-      return { x: Math.floor((COLS - 1) / 2), y: Math.floor((ROWS - 1) / 2) };
+      return { x: Math.floor(COLS / 2), y: Math.floor(ROWS / 2) };
     }
 
     function getPieceCenterCell(p) {
@@ -2039,7 +2402,7 @@
       if (piecePlaced % LIT_BOMB_TRIGGER_EVERY !== 0) return false;
       if (Math.random() > getLitBombProb(currentFillPct)) return false;
       const { x: cx, y: cy } = getCenterCell();
-      const bomb = { x: cx, y: cy, color: 0, shape: [[0,0]], itemTypeId: 0, itemIndex: -1, isLitBomb: true, bombEndsAt: performance.now() + LIT_BOMB_MS };
+      const bomb = { x: cx, y: cy, renderX: cx, renderY: cy, blockedMs: 0, color: 0, shape: [[0,0]], itemTypeId: 0, itemIndex: -1, isLitBomb: true, bombEndsAt: performance.now() + LIT_BOMB_MS };
       if (overlapsGrid(bomb.x, bomb.y, bomb.shape)) {
         explode3x3(cx, cy, true);
         spawnPiece();
@@ -2063,6 +2426,29 @@
       if (toastText) showToast(toastText, '#ffd93d');
     }
 
+    function getInventorySlotCanvasPos(slotIndex) {
+      const bar = document.getElementById('itemBar');
+      if (!bar) return null;
+      const slots = bar.querySelectorAll('.item-slot');
+      const el = slots && slots[slotIndex];
+      if (!el) return null;
+      const cr = canvas.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      const scaleX = cr.width > 0 ? (canvas.width / cr.width) : 1;
+      const scaleY = cr.height > 0 ? (canvas.height / cr.height) : 1;
+      return {
+        x: (r.left + r.width / 2 - cr.left) * scaleX,
+        y: (r.top + r.height / 2 - cr.top) * scaleY,
+      };
+    }
+
+    function getItemTint(itemTypeId) {
+      if (itemTypeId === ITEM_TYPES.bomb.id) return 'rgba(255,107,107,1)';
+      if (itemTypeId === ITEM_TYPES.laser.id) return 'rgba(107,203,255,1)';
+      if (itemTypeId === ITEM_TYPES.defuse.id) return 'rgba(100,255,218,1)';
+      return 'rgba(199,146,234,1)';
+    }
+
     function collectWorldPickupAt(x, y) {
       if (gameMode !== 'items') return false;
       const idx = worldPickups.findIndex(p => p.x === x && p.y === y);
@@ -2070,6 +2456,21 @@
       const p = worldPickups[idx];
       worldPickups.splice(idx, 1);
       pushInventory(p.itemTypeId);
+      const slotIndex = Math.max(0, Math.min(INVENTORY_SIZE - 1, inventory.length - 1));
+      const end = getInventorySlotCanvasPos(slotIndex);
+      if (end) {
+        const meta = getItemById(p.itemTypeId);
+        flyItems.push({
+          sx: (x + 0.5) * CELL,
+          sy: (y + 0.5) * CELL,
+          ex: end.x,
+          ey: end.y,
+          t: 0,
+          maxT: 520,
+          color: getItemTint(p.itemTypeId),
+          label: meta ? meta.icon : '',
+        });
+      }
       playSfx('itemCollect');
       addScorePart('itemCollect', ITEM_SCORES.collect, `获得道具 +${ITEM_SCORES.collect}`, '#ffd93d');
       return true;
@@ -2146,52 +2547,61 @@
       if (gameMode !== 'items') return;
       const itemTypeId = inventory[slotIndex];
       if (!itemTypeId) return;
-      inventory.splice(slotIndex, 1);
-      updateItemBar();
-      itemUseCount += 1;
-      useItem(itemTypeId);
-    }
-
-    function useItem(itemTypeId) {
-      if (itemTypeId === ITEM_TYPES.bomb.id) return useBomb();
-      if (itemTypeId === ITEM_TYPES.fill.id) return useFill();
-      if (itemTypeId === ITEM_TYPES.laser.id) return useLaser();
-      if (itemTypeId === ITEM_TYPES.clean.id) return useClean();
-      if (itemTypeId === ITEM_TYPES.single.id) return useSingleify();
-      if (itemTypeId === ITEM_TYPES.shuffle.id) return useShuffle();
-    }
-
-    function useBomb() {
-      const rows = Math.min(3, ROWS);
-      let cleared = 0;
-      for (let y = ROWS - 1; y >= ROWS - rows; y--) {
-        for (let x = 0; x < COLS; x++) {
-          const cell = grid[y][x];
-          if (!cell) continue;
-          const { itemTypeId } = decodeCell(cell);
-          if (itemTypeId) collectItem(itemTypeId);
-          grid[y][x] = 0;
-          cleared += 1;
-        }
-      }
-      addScorePart('itemUse', cleared * ITEM_SCORES.bombPerCell, `炸弹 +${cleared * ITEM_SCORES.bombPerCell}`, '#ff6b6b');
-      const removed = checkLines();
-      applyBalanceReward(removed);
-    }
-
-    function useLaser() {
-      if (!piece) {
-        showToast('没有可用目标', '#ffd93d');
+      if (pendingTarget && pendingTarget.slotIndex === slotIndex && pendingTarget.itemTypeId === itemTypeId) {
+        pendingTarget = null;
+        aimCell = null;
+        tiltX = 0; tiltY = 0; moveAccX = 0; moveAccY = 0;
+        updateItemBar();
         return;
       }
-      let sx = 0, sy = 0;
-      for (const [px, py] of piece.shape) {
-        sx += piece.x + px;
-        sy += piece.y + py;
+      if (itemTypeId === ITEM_TYPES.defuse.id && !(piece && piece.isLitBomb)) {
+        showToast('没有点燃炸弹', '#ffd93d', 900);
+        return;
       }
-      const tx = Math.max(0, Math.min(COLS - 1, Math.round(sx / piece.shape.length)));
-      const ty = Math.max(0, Math.min(ROWS - 1, Math.round(sy / piece.shape.length)));
+      pendingTarget = { slotIndex, itemTypeId };
+      pendingTargetPulseT = performance.now();
+      aimCell = null;
+      tiltX = 0; tiltY = 0; moveAccX = 0; moveAccY = 0;
+      resetKeyboardInput();
+      const k = 'grav_first_item_hint_v2';
+      if (!localStorage.getItem(k)) {
+        localStorage.setItem(k, '1');
+        showToast('提示：选道具后，再点棋盘格子使用', '#ffd93d', 1200);
+      } else {
+        showToast('点击棋盘格子使用', '#ffd93d', 900);
+      }
+      updateItemBar();
+    }
 
+    function removeUsedItemFromInventory(slotIndex, itemTypeId) {
+      if (!inventory.length) return;
+      if (inventory[slotIndex] === itemTypeId) {
+        inventory.splice(slotIndex, 1);
+        return;
+      }
+      const idx = inventory.findIndex(v => v === itemTypeId);
+      if (idx >= 0) inventory.splice(idx, 1);
+    }
+
+    function useFillAt(tx, ty) {
+      const colorIndex1 = Math.floor(Math.random() * COLORS.length) + 1;
+      grid[ty][tx] = encodeCell(colorIndex1, 0);
+      addScorePart('itemUse', ITEM_SCORES.fillPerCell, `填补 +${ITEM_SCORES.fillPerCell}`, '#c792ea');
+      landBounces.push({ x: tx, y: ty, t: 0, maxT: 180 });
+      triggerShake(6, 120);
+      const removed = checkLines();
+      applyBalanceReward(removed);
+      return true;
+    }
+
+    function useBombAt(tx, ty) {
+      explode3x3(tx, ty, false);
+      const removed = checkLines();
+      applyBalanceReward(removed);
+      return true;
+    }
+
+    function useLaserAt(tx, ty) {
       let cleared = 0;
       for (let x = 0; x < COLS; x++) {
         const cell = grid[ty][x];
@@ -2202,6 +2612,7 @@
         cleared += 1;
       }
       for (let y = 0; y < ROWS; y++) {
+        if (y === ty) continue;
         const cell = grid[y][tx];
         if (!cell) continue;
         const { itemTypeId } = decodeCell(cell);
@@ -2212,42 +2623,18 @@
       addScorePart('itemUse', cleared * ITEM_SCORES.laserPerCell, `激光 +${cleared * ITEM_SCORES.laserPerCell}`, '#6bcbff');
       const removed = checkLines();
       applyBalanceReward(removed);
-      playSfx('itemUse');
       return true;
     }
 
-    function useMagnetAt(tx, ty) {
-      const radius = 2;
-      const coords = [];
-      for (let y = Math.max(0, ty - radius); y <= Math.min(ROWS - 1, ty + radius); y++) {
-        for (let x = Math.max(0, tx - radius); x <= Math.min(COLS - 1, tx + radius); x++) {
-          if (!grid[y][x]) continue;
-          const dist = Math.abs(tx - x) + Math.abs(ty - y);
-          coords.push({ x, y, dist });
-        }
-      }
-      coords.sort((a, b) => b.dist - a.dist);
-      let moved = 0;
-      for (const c of coords) {
-        const v = grid[c.y][c.x];
-        if (!v) continue;
-        const dx = tx === c.x ? 0 : (tx > c.x ? 1 : -1);
-        const dy = ty === c.y ? 0 : (ty > c.y ? 1 : -1);
-        let nx = c.x;
-        let ny = c.y;
-        if (Math.abs(tx - c.x) >= Math.abs(ty - c.y)) nx = c.x + dx;
-        else ny = c.y + dy;
-        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
-        if (grid[ny][nx]) continue;
-        grid[ny][nx] = v;
-        grid[c.y][c.x] = 0;
-        moved += 1;
-      }
-      if (ITEM_SCORES.magnet) addScorePart('itemUse', ITEM_SCORES.magnet, `磁铁 +${ITEM_SCORES.magnet}`, '#64ffda');
-      showToast(moved > 0 ? '磁吸！' : '磁铁无效', '#64ffda', 650);
-      const removed = checkLines();
-      applyBalanceReward(removed);
-      playSfx('itemUse');
+    function useDefuseAt(tx, ty) {
+      if (!(piece && piece.isLitBomb && piece.x === tx && piece.y === ty)) return false;
+      piece = null;
+      moveAccX = 0;
+      moveAccY = 0;
+      pushInventory(ITEM_TYPES.bomb.id, '拆弹成功：获得💣');
+      triggerShake(10, 160);
+      triggerFlash('rgba(100,255,218,0.22)', 160);
+      spawnPiece();
       return true;
     }
 
@@ -2255,151 +2642,40 @@
       return worldPickups.some(p => p.x === x && p.y === y);
     }
 
-    function usePendingItemAtCell(x, y) {
-      if (!pendingTarget) return false;
+    function isUsableCellForItem(itemTypeId, x, y) {
       if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return false;
-      if (grid[y][x] !== 0) {
-        showToast('请选择空格', '#ffd93d', 700);
-        return false;
+      if (itemTypeId === ITEM_TYPES.defuse.id) {
+        return !!(piece && piece.isLitBomb && piece.x === x && piece.y === y);
       }
-      if (isPickupCell(x, y)) {
-        showToast('该格有拾取点', '#ffd93d', 700);
-        return false;
-      }
-      if (isInCenterZone(x, y)) {
-        showToast('斩杀线不可用', '#ff6b6b', 700);
-        return false;
-      }
-
-      const { itemTypeId, slotIndex } = pendingTarget;
-      const coldBombId = ITEM_TYPES.coldBomb ? ITEM_TYPES.coldBomb.id : 0;
-      const magnetId = ITEM_TYPES.magnet ? ITEM_TYPES.magnet.id : 0;
-      let ok = false;
-      if (coldBombId && itemTypeId === coldBombId && typeof useColdBombAt === 'function') ok = useColdBombAt(x, y);
-      else if (itemTypeId === ITEM_TYPES.laser.id && typeof useLaserAt === 'function') ok = useLaserAt(x, y);
-      else if (magnetId && itemTypeId === magnetId) ok = useMagnetAt(x, y);
-      else ok = false;
-      if (!ok) return false;
-
-      const realId = inventory[slotIndex];
-      if (realId !== itemTypeId) {
-        const idx = inventory.findIndex(v => v === itemTypeId);
-        if (idx >= 0) inventory.splice(idx, 1);
-      } else {
-        inventory.splice(slotIndex, 1);
-      }
-      updateItemBar();
-      itemUseCount += 1;
-      pendingTarget = null;
-      updateItemBar();
+      if (grid[y][x] !== 0) return false;
+      if (isPickupCell(x, y)) return false;
+      if (isInCenterZone(x, y)) return false;
       return true;
     }
 
-    function useClean() {
-      const present = new Set();
-      for (let y = 0; y < ROWS; y++) {
-        for (let x = 0; x < COLS; x++) {
-          const cell = grid[y][x];
-          if (!cell) continue;
-          const { colorIndex1 } = decodeCell(cell);
-          present.add(colorIndex1);
-        }
+    function usePendingItemAtCell(x, y) {
+      if (!pendingTarget) return false;
+      if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return false;
+      const { itemTypeId, slotIndex } = pendingTarget;
+      let ok = false;
+      if (!isUsableCellForItem(itemTypeId, x, y)) {
+        if (itemTypeId === ITEM_TYPES.defuse.id) showToast('请点击点燃炸弹', '#ffd93d', 900);
+        else showToast('请选择可用空格', '#ffd93d', 900);
+        return false;
       }
-      if (present.size === 0) {
-        showToast('盘面为空', '#ffd93d');
-        return;
-      }
-      const arr = Array.from(present);
-      const target = arr[Math.floor(Math.random() * arr.length)];
-      let cleared = 0;
-      for (let y = 0; y < ROWS; y++) {
-        for (let x = 0; x < COLS; x++) {
-          const cell = grid[y][x];
-          if (!cell) continue;
-          const { itemTypeId, colorIndex1 } = decodeCell(cell);
-          if (colorIndex1 !== target) continue;
-          if (itemTypeId) collectItem(itemTypeId);
-          grid[y][x] = 0;
-          cleared += 1;
-        }
-      }
-      addScorePart('itemUse', cleared * ITEM_SCORES.cleanPerCell, `清扫 +${cleared * ITEM_SCORES.cleanPerCell}`, '#ffd93d');
-      const removed = checkLines();
-      applyBalanceReward(removed);
-    }
-
-    function useFill() {
-      const holes = [];
-      for (let x = 0; x < COLS; x++) {
-        let seenBlock = false;
-        for (let y = 0; y < ROWS; y++) {
-          if (grid[y][x]) {
-            seenBlock = true;
-            continue;
-          }
-          if (seenBlock) holes.push({ x, y });
-        }
-      }
-      holes.sort((a, b) => b.y - a.y);
-      const count = Math.min(5, holes.length);
-      for (let i = 0; i < count; i++) {
-        const { x, y } = holes[i];
-        const colorIndex1 = Math.floor(Math.random() * COLORS.length) + 1;
-        if (isInCenterZone(x, y)) continue;
-        grid[y][x] = encodeCell(colorIndex1, 0);
-      }
-      addScorePart('itemUse', count * ITEM_SCORES.fillPerCell, `填补 +${count * ITEM_SCORES.fillPerCell}`, '#c792ea');
-      const removed = checkLines();
-      applyBalanceReward(removed);
-    }
-
-    function useSingleify() {
-      if (!piece) {
-        showToast('没有可变形方块', '#ffd93d');
-        return;
-      }
-      piece.shape = [[0,0]];
-      piece.itemTypeId = 0;
-      piece.itemIndex = -1;
-      if (overlapsGrid(piece.x, piece.y, piece.shape)) {
-        let placed = false;
-        for (let r = 0; r < Math.max(COLS, ROWS) && !placed; r++) {
-          for (let dy = -r; dy <= r && !placed; dy++) {
-            for (let dx = -r; dx <= r && !placed; dx++) {
-              const nx = piece.x + dx;
-              const ny = piece.y + dy;
-              if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
-              if (overlapsGrid(nx, ny, piece.shape)) continue;
-              piece.x = nx;
-              piece.y = ny;
-              placed = true;
-            }
-          }
-        }
-        if (!placed) gameOver('无处可放');
-      }
-      showToast('单格化', '#64ffda');
-    }
-
-    function useShuffle() {
-      for (let x = 0; x < COLS; x++) {
-        const col = [];
-        for (let y = 0; y < ROWS; y++) {
-          const cell = grid[y][x];
-          if (cell) col.push(cell);
-        }
-        for (let y = 0; y < ROWS; y++) grid[y][x] = 0;
-        let y = ROWS - 1;
-        for (let i = col.length - 1; i >= 0; i--) {
-          while (y >= 0 && isInCenterZone(x, y)) y -= 1;
-          if (y < 0) break;
-          grid[y][x] = col[i];
-          y -= 1;
-        }
-      }
-      addScorePart('itemUse', ITEM_SCORES.shuffle, `压缩 +${ITEM_SCORES.shuffle}`, '#64ffda');
-      const removed = checkLines();
-      applyBalanceReward(removed);
+      if (itemTypeId === ITEM_TYPES.fill.id) ok = useFillAt(x, y);
+      else if (itemTypeId === ITEM_TYPES.bomb.id) ok = useBombAt(x, y);
+      else if (itemTypeId === ITEM_TYPES.laser.id) ok = useLaserAt(x, y);
+      else if (itemTypeId === ITEM_TYPES.defuse.id) ok = useDefuseAt(x, y);
+      else ok = false;
+      if (!ok) return false;
+      removeUsedItemFromInventory(slotIndex, itemTypeId);
+      itemUseCount += 1;
+      pendingTarget = null;
+      aimCell = null;
+      tiltX = 0; tiltY = 0; moveAccX = 0; moveAccY = 0;
+      updateItemBar();
+      return true;
     }
 
     // ============== 固定 ==============
@@ -2427,6 +2703,10 @@
       updateItemBar();
       const placementScore = computePlacementScore(preEdge, placedCells);
       addScorePart('placement', placementScore, '', '#64ffda', true);
+      if (placedCells.length) {
+        for (const c2 of placedCells) landBounces.push({ x: c2.x, y: c2.y, t: 0, maxT: 180 });
+        triggerShake(6, 120);
+      }
     }
 
     // ============== 消除行列 ==============
@@ -2602,12 +2882,15 @@
         if (clearsEl) clearsEl.textContent = `${clears}`;
         const bonus = [100, 300, 600, 1000, 1500][Math.min(removed - 1, 4)];
         addScorePart('clear', bonus, '', '#64ffda', true);
-        vibrate([12, 20, 12]);
+        const pat = removed >= 3 ? [18, 28, 18, 28, 18] : [14, 22, 14];
+        vibrate(pat);
+        triggerShake(10 + removed * 3, 180);
+        triggerFlash('rgba(100,255,218,0.22)', 160);
         if (removed === 1) playSfx('clear1');
         else if (removed === 2) playSfx('clear2');
         else if (removed === 3) playSfx('clear3');
         else playSfx('clear4');
-        // 消除闪光效果
+        if (removed >= 2) comboPop = { t: 0, maxT: 900, text: `Combo x${removed}!` };
         flashEffect();
       }
       return removed;
@@ -2616,7 +2899,7 @@
     function flashEffect() {
       let count = 0;
       const t = setInterval(() => {
-        ctx.fillStyle = `rgba(100,255,218,${0.15 - count * 0.03})`;
+        ctx.fillStyle = `rgba(100,255,218,${0.24 - count * 0.05})`;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         if (++count >= 5) clearInterval(t);
       }, 30);
@@ -2640,8 +2923,8 @@
     function computePlacementScore(preEdge, placedCells) {
       if (!placedCells.length) return 0;
       const band = 2;
-      const cx = Math.floor((COLS - 1) / 2);
-      const cy = Math.floor((ROWS - 1) / 2);
+      const cx = Math.floor(COLS / 2);
+      const cy = Math.floor(ROWS / 2);
       const edgeValues = [preEdge.top, preEdge.bottom, preEdge.left, preEdge.right];
       const minEdge = Math.min(...edgeValues);
 
@@ -2691,7 +2974,7 @@
       const minV = Math.min(...values);
       const diff = maxV - minV;
 
-      const threshold = COLS <= 10 ? 4 : COLS <= 15 ? 6 : 8;
+      const threshold = COLS <= 10 ? 4 : COLS <= 14 ? 6 : 8;
       if (diff > threshold) return;
 
       const base = 120;
@@ -2701,19 +2984,56 @@
       addScorePart('balance', bonus, `均衡奖励 +${bonus}`, '#64ffda', true);
     }
 
+    function getLandingPreviewCell() {
+      if (!piece) return null;
+      if (gameState !== 'playing') return null;
+      if (pendingTarget) return null;
+      if (piece.isLitBomb) return null;
+      const speedMult = DIFF_CONFIG[selectedDiff].speedMult;
+      const sx = tiltToSpeed(Math.abs(tiltX), speedMult);
+      const sy = tiltToSpeed(Math.abs(tiltY), speedMult);
+      if (sx <= 0.001 && sy <= 0.001) return null;
+      const primary = (sx >= sy) ? 'x' : 'y';
+      const dx = tiltX < 0 ? -1 : 1;
+      const dy = tiltY < 0 ? -1 : 1;
+      let px = piece.x;
+      let py = piece.y;
+      for (let i = 0; i < COLS + ROWS + 10; i++) {
+        let moved = false;
+        if (primary === 'x' && sx > 0.001) {
+          const nx = px + dx;
+          if (!outOfBounds(nx, py, piece.shape) && !overlapsGrid(nx, py, piece.shape)) { px = nx; moved = true; }
+        } else if (primary === 'y' && sy > 0.001) {
+          const ny = py + dy;
+          if (!outOfBounds(px, ny, piece.shape) && !overlapsGrid(px, ny, piece.shape)) { py = ny; moved = true; }
+        }
+        if (!moved) break;
+      }
+      if (px === piece.x && py === piece.y) return null;
+      return { x: px, y: py };
+    }
+
     // ============== 渲染 ==============
     function render() {
       const now = performance.now();
+      let ox = 0;
+      let oy = 0;
+      if (screenShake.maxT > 0) {
+        const p = Math.min(1, screenShake.t / screenShake.maxT);
+        const a = screenShake.amp * (1 - p);
+        ox = (Math.random() - 0.5) * a;
+        oy = (Math.random() - 0.5) * a;
+      }
+      ctx.save();
+      ctx.translate(ox, oy);
       ctx.fillStyle = '#0d1117';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(-40, -40, canvas.width + 80, canvas.height + 80);
 
-      const r = centerRadius();
-      const cx = Math.floor((COLS - 1) / 2);
-      const cy = Math.floor((ROWS - 1) / 2);
-      const zx0 = Math.max(0, cx - r) * CELL;
-      const zy0 = Math.max(0, cy - r) * CELL;
-      const zx1 = (Math.min(COLS - 1, cx + r) + 1) * CELL;
-      const zy1 = (Math.min(ROWS - 1, cy + r) + 1) * CELL;
+      const { x0: kzX0, y0: kzY0, x1: kzX1, y1: kzY1 } = getKillZoneBounds();
+      const zx0 = kzX0 * CELL;
+      const zy0 = kzY0 * CELL;
+      const zx1 = kzX1 * CELL;
+      const zy1 = kzY1 * CELL;
       const zw = zx1 - zx0;
       const zh = zy1 - zy0;
       const zp = 0.55 + 0.45 * Math.sin(now / 260);
@@ -2749,7 +3069,8 @@
       ctx.restore();
 
       // 中心十字虚线
-      ctx.strokeStyle = 'rgba(100,255,218,0.1)';
+      const gridPulse = 0.5 + 0.5 * Math.sin(now / 950);
+      ctx.strokeStyle = `rgba(100,255,218,${0.08 + 0.05 * gridPulse})`;
       ctx.setLineDash([4, 4]);
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -2763,7 +3084,7 @@
       ctx.setLineDash([]);
 
       // 网格线
-      ctx.strokeStyle = 'rgba(100,255,218,0.05)';
+      ctx.strokeStyle = `rgba(100,255,218,${0.035 + 0.025 * gridPulse})`;
       for (let i = 0; i <= COLS; i++) {
         ctx.beginPath();
         ctx.moveTo(i * CELL, 0);
@@ -2778,31 +3099,73 @@
       }
 
       // 固定方块
+      const bounceMap = new Map();
+      for (const b of landBounces) bounceMap.set(`${b.x},${b.y}`, b);
       for (let y = 0; y < ROWS; y++) {
         for (let x = 0; x < COLS; x++) {
           if (grid[y][x]) {
             const meta = decodeCell(grid[y][x]);
             const item = meta.itemTypeId ? getItemById(meta.itemTypeId) : null;
-            drawBlock(x, y, COLORS[meta.colorIndex1 - 1], 1, false, item ? item.label : '');
+            const b = bounceMap.get(`${x},${y}`);
+            if (b) {
+              const p = Math.min(1, b.t / b.maxT);
+              const k = Math.sin((1 - p) * Math.PI);
+              drawBlockScaled(x, y, COLORS[meta.colorIndex1 - 1], 1 + 0.12 * k, 1, false, item ? item.icon : '');
+            } else {
+              drawBlock(x, y, COLORS[meta.colorIndex1 - 1], 1, false, item ? item.icon : '');
+            }
           }
         }
+      }
+
+      const preview = getLandingPreviewCell();
+      if (preview) {
+        ctx.save();
+        ctx.setLineDash([Math.max(6, CELL * 0.35), Math.max(4, CELL * 0.22)]);
+        ctx.strokeStyle = 'rgba(230,237,243,0.55)';
+        ctx.lineWidth = Math.max(1, CELL * 0.08);
+        for (const [px, py] of piece.shape) {
+          const x = preview.x + px;
+          const y = preview.y + py;
+          if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
+          ctx.strokeRect(x * CELL + 3, y * CELL + 3, CELL - 6, CELL - 6);
+        }
+        ctx.setLineDash([]);
+        ctx.restore();
       }
 
       if (pendingTarget && gameState === 'playing' && gameMode === 'items') {
         const a = 0.10 + 0.06 * Math.sin((now - pendingTargetPulseT) / 160);
         ctx.fillStyle = 'rgba(13, 17, 23, 0.35)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const itemTypeId = pendingTarget.itemTypeId;
         for (let y = 0; y < ROWS; y++) {
           for (let x = 0; x < COLS; x++) {
-            if (grid[y][x] !== 0) continue;
-            if (isInCenterZone(x, y)) continue;
-            if (isPickupCell(x, y)) continue;
+            if (!isUsableCellForItem(itemTypeId, x, y)) continue;
             ctx.fillStyle = `rgba(255, 217, 61, ${a})`;
             ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
             ctx.strokeStyle = `rgba(255, 217, 61, ${0.40 + a})`;
             ctx.lineWidth = Math.max(1, CELL * 0.06);
             ctx.strokeRect(x * CELL + 2, y * CELL + 2, CELL - 4, CELL - 4);
           }
+        }
+        if (aimCell && aimCell.x >= 0 && aimCell.x < COLS && aimCell.y >= 0 && aimCell.y < ROWS) {
+          const bx = aimCell.x * CELL;
+          const by = aimCell.y * CELL;
+          const ok = !!aimCell.valid;
+          const c = ok ? 'rgba(255,217,61,1)' : 'rgba(255,107,107,1)';
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = c;
+          ctx.lineWidth = Math.max(2, CELL * 0.12);
+          ctx.strokeRect(bx + 2, by + 2, CELL - 4, CELL - 4);
+          ctx.strokeStyle = c.replace(',1)', ',0.55)');
+          ctx.lineWidth = Math.max(1, CELL * 0.06);
+          ctx.beginPath();
+          ctx.moveTo(bx + CELL / 2, by + 6);
+          ctx.lineTo(bx + CELL / 2, by + CELL - 6);
+          ctx.moveTo(bx + 6, by + CELL / 2);
+          ctx.lineTo(bx + CELL - 6, by + CELL / 2);
+          ctx.stroke();
         }
       }
 
@@ -2813,14 +3176,7 @@
           if (!meta) continue;
           const px = p.x * CELL + CELL / 2;
           const py = p.y * CELL + CELL / 2;
-          const coldBombId = ITEM_TYPES.coldBomb ? ITEM_TYPES.coldBomb.id : 0;
-          const defuseId = ITEM_TYPES.defuse ? ITEM_TYPES.defuse.id : 0;
-          const magnetId = ITEM_TYPES.magnet ? ITEM_TYPES.magnet.id : 0;
-          let color = 'rgba(255,217,61,1)';
-          if (coldBombId && p.itemTypeId === coldBombId) color = 'rgba(255,107,107,1)';
-          if (defuseId && p.itemTypeId === defuseId) color = 'rgba(100,255,218,1)';
-          if (p.itemTypeId === ITEM_TYPES.laser.id) color = 'rgba(107,203,255,1)';
-          if (magnetId && p.itemTypeId === magnetId) color = 'rgba(199,146,234,1)';
+          const color = getItemTint(p.itemTypeId);
           ctx.globalAlpha = 1;
           ctx.shadowColor = color;
           ctx.shadowBlur = 22;
@@ -2843,9 +3199,34 @@
           ctx.font = `${Math.max(12, Math.floor(CELL * 0.42))}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText(meta.label, px, py + 0.5);
+          ctx.fillText(meta.icon, px, py + 0.5);
         }
       }
+
+      for (const f of flyItems) {
+        const p = Math.min(1, f.t / f.maxT);
+        const e = 1 - Math.pow(1 - p, 3);
+        const x = f.sx + (f.ex - f.sx) * e;
+        const y = f.sy + (f.ey - f.sy) * e;
+        const a = 1 - p;
+        ctx.globalAlpha = 0.95 * a;
+        ctx.shadowColor = f.color;
+        ctx.shadowBlur = 18;
+        ctx.fillStyle = f.color.replace(',1)', ',0.85)');
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(6, CELL * 0.18), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        if (f.label) {
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = 'rgba(13, 17, 23, 0.9)';
+          ctx.font = `${Math.max(10, Math.floor(CELL * 0.42))}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(f.label, x, y + 0.5);
+        }
+      }
+      ctx.globalAlpha = 1;
 
       // 当前方块 + 边缘预警高亮
       if (piece) {
@@ -2856,8 +3237,10 @@
           const danger = 1 - Math.min(1, remainMs / LIT_BOMB_MS);
           const flash = 0.45 + 0.55 * Math.sin(now / (110 - 70 * danger));
           const alpha = 0.70 + 0.30 * Math.max(0, flash);
-          const cxp = (piece.x + 0.5) * CELL;
-          const cyp = (piece.y + 0.5) * CELL;
+          const bx = (piece.renderX === undefined ? piece.x : piece.renderX);
+          const by = (piece.renderY === undefined ? piece.y : piece.renderY);
+          const cxp = (bx + 0.5) * CELL;
+          const cyp = (by + 0.5) * CELL;
           const ringP = 0.5 + 0.5 * Math.sin(now / 90);
           const ringR = CELL * (0.78 + 0.42 * ringP + 0.25 * danger);
           ctx.globalAlpha = 0.85;
@@ -2875,16 +3258,18 @@
           ctx.stroke();
           ctx.setLineDash([]);
           ctx.globalAlpha = 1;
-          drawBlock(piece.x, piece.y, '#ff6b6b', alpha, true, label);
+          drawBlock(bx, by, '#ff6b6b', alpha, true, label);
         } else {
         // 判断是否贴着任何边缘/方块（用于视觉提示）
         const nearEdge = isNearEdge();
+        const bx = (piece.renderX === undefined ? piece.x : piece.renderX);
+        const by = (piece.renderY === undefined ? piece.y : piece.renderY);
         for (let i = 0; i < piece.shape.length; i++) {
           const [px, py] = piece.shape[i];
-          const wx = piece.x + px, wy = piece.y + py;
-          if (wx >= 0 && wx < COLS && wy >= 0 && wy < ROWS) {
+          const gx = piece.x + px, gy = piece.y + py;
+          if (gx >= 0 && gx < COLS && gy >= 0 && gy < ROWS) {
             const item = (gameMode === 'items' && piece.itemTypeId && i === piece.itemIndex) ? getItemById(piece.itemTypeId) : null;
-            drawBlock(wx, wy, COLORS[piece.color], 1, nearEdge || !!item, item ? item.label : '');
+            drawBlock(bx + px, by + py, COLORS[piece.color], 1, nearEdge || !!item, item ? item.icon : '');
           }
         }
         }
@@ -2942,6 +3327,33 @@
         }
         ctx.globalAlpha = 1;
       }
+
+      if (comboPop.maxT > 0 && comboPop.text) {
+        const p = Math.min(1, comboPop.t / comboPop.maxT);
+        const a = (1 - p);
+        const s = 1 + 0.22 * (1 - p);
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.translate(canvas.width / 2, canvas.height * 0.18);
+        ctx.scale(s, s);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(0,0,0,0.45)';
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = 'rgba(255,217,61,0.96)';
+        ctx.font = `${Math.max(18, Math.floor(CELL * 0.9))}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+        ctx.fillText(comboPop.text, 0, 0);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+      if (screenFlash.maxT > 0) {
+        const p = Math.min(1, screenFlash.t / screenFlash.maxT);
+        ctx.globalAlpha = (1 - p);
+        ctx.fillStyle = screenFlash.color;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.globalAlpha = 1;
+      }
     }
 
     // 检查是否紧贴边/方块（当前倾斜方向的下一格）
@@ -2960,19 +3372,44 @@
       return false;
     }
 
+    function roundRectPath(x, y, w, h, r) {
+      const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+      ctx.beginPath();
+      ctx.moveTo(x + rr, y);
+      ctx.arcTo(x + w, y, x + w, y + h, rr);
+      ctx.arcTo(x + w, y + h, x, y + h, rr);
+      ctx.arcTo(x, y + h, x, y, rr);
+      ctx.arcTo(x, y, x + w, y, rr);
+      ctx.closePath();
+    }
+
     function drawBlock(x, y, color, alpha = 1, glow = false, label = '') {
+      const left = x * CELL + 1;
+      const top = y * CELL + 1;
+      const w = CELL - 2;
+      const h = CELL - 2;
+      const r = Math.max(4, CELL * 0.18);
+      ctx.save();
       ctx.globalAlpha = alpha;
       if (glow) {
         ctx.shadowColor = color;
+        ctx.shadowBlur = 12;
+      } else {
+        ctx.shadowColor = 'rgba(0,0,0,0.30)';
         ctx.shadowBlur = 10;
       }
+      roundRectPath(left, top, w, h, r);
       ctx.fillStyle = color;
-      ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
-      // 高光
-      ctx.fillStyle = 'rgba(255,255,255,0.22)';
-      ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, Math.max(3, (CELL - 2) / 4));
+      ctx.fill();
+      ctx.clip();
+      const g = ctx.createLinearGradient(left, top, left + w, top + h);
+      g.addColorStop(0, 'rgba(255,255,255,0.22)');
+      g.addColorStop(0.45, 'rgba(255,255,255,0.06)');
+      g.addColorStop(1, 'rgba(0,0,0,0.18)');
+      ctx.fillStyle = g;
+      ctx.fillRect(left, top, w, h);
+      ctx.restore();
       if (label) {
-        ctx.shadowBlur = 0;
         ctx.globalAlpha = 1;
         ctx.fillStyle = 'rgba(13, 17, 23, 0.9)';
         ctx.font = `${Math.max(10, Math.floor(CELL * 0.42))}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
@@ -2980,7 +3417,44 @@
         ctx.textBaseline = 'middle';
         ctx.fillText(label, x * CELL + CELL / 2, y * CELL + CELL / 2);
       }
-      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+    }
+
+    function drawBlockScaled(x, y, color, scale = 1, alpha = 1, glow = false, label = '') {
+      const cx = x * CELL + CELL / 2;
+      const cy = y * CELL + CELL / 2;
+      const s = (CELL - 2) * scale;
+      const left = cx - s / 2;
+      const top = cy - s / 2;
+      const r = Math.max(4, CELL * 0.18) * Math.min(1, scale);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      if (glow) {
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 12;
+      } else {
+        ctx.shadowColor = 'rgba(0,0,0,0.30)';
+        ctx.shadowBlur = 10;
+      }
+      roundRectPath(left, top, s, s, r);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.clip();
+      const g = ctx.createLinearGradient(left, top, left + s, top + s);
+      g.addColorStop(0, 'rgba(255,255,255,0.22)');
+      g.addColorStop(0.45, 'rgba(255,255,255,0.06)');
+      g.addColorStop(1, 'rgba(0,0,0,0.18)');
+      ctx.fillStyle = g;
+      ctx.fillRect(left, top, s, s);
+      ctx.restore();
+      if (label) {
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = 'rgba(13, 17, 23, 0.9)';
+        ctx.font = `${Math.max(10, Math.floor(CELL * 0.42))}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, cx, cy);
+      }
       ctx.globalAlpha = 1;
     }
 
@@ -2989,6 +3463,10 @@
       if (gameState === 'dead') return;
       lastGameOverReason = reason || '';
       gameState = 'dead';
+      if (lastGameOverReason.includes('斩杀线')) {
+        triggerFlash('rgba(255,107,107,0.35)', 240);
+        triggerShake(18, 220);
+      }
       playSfx('gameOver');
       updateRestartVisibility();
       updateInfoVisibility();
