@@ -285,8 +285,50 @@
       z-index: 20;
       color: #fff;
     }
+    #overlay.menu {
+      position: fixed;
+      inset: 0;
+      padding: 18px;
+      overflow: hidden;
+      touch-action: none;
+      justify-content: center;
+      background: radial-gradient(circle at 30% 10%, rgba(100,255,218,0.12), transparent 42%),
+                  radial-gradient(circle at 70% 30%, rgba(255,107,107,0.10), transparent 46%),
+                  rgba(13, 17, 23, 0.92);
+      z-index: 220;
+    }
+    #overlayCard {
+      width: min(92vw, calc(92vh * 9 / 16));
+      aspect-ratio: 9 / 16;
+      max-height: 92vh;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(13, 17, 23, 0.92);
+      box-shadow: 0 24px 60px rgba(0,0,0,0.55);
+      overflow: hidden;
+    }
+    #overlayViewport {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px 0;
+    }
+    #overlayInner {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      transform-origin: top center;
+      will-change: transform;
+    }
     #overlay * {
       touch-action: pan-y;
+    }
+    #overlay.menu * {
+      touch-action: none;
     }
     #overlay h1 {
       font-size: 26px;
@@ -621,45 +663,51 @@
         <div id="gameContainer">
           <canvas id="gameCanvas"></canvas>
           <div id="overlay">
-            <h1>重力方块</h1>
-            <p class="subtitle">方块从中央生成<br>倾斜手机 / 方向键控制<br>贴边可滑行，将要碰到才停下</p>
+            <div id="overlayCard">
+              <div id="overlayViewport">
+                <div id="overlayInner">
+                  <h1>重力方块</h1>
+                  <p class="subtitle">方块从中央生成<br>倾斜手机 / 方向键控制<br>贴边可滑行，将要碰到才停下</p>
 
-            <div class="mode-section">
-              <label>模式</label>
-              <div class="mode-btns" id="modeGroup">
-                <button class="mode-btn active" data-mode="normal">普通</button>
-                <button class="mode-btn" data-mode="items">道具</button>
+                  <div class="mode-section">
+                    <label>模式</label>
+                    <div class="mode-btns" id="modeGroup">
+                      <button class="mode-btn active" data-mode="normal">普通</button>
+                      <button class="mode-btn" data-mode="items">道具</button>
+                    </div>
+                  </div>
+
+                  <div class="mode-section">
+                    <label>画布大小</label>
+                    <div class="mode-btns" id="sizeGroup">
+                      <button class="mode-btn" data-size="10">10×10</button>
+                      <button class="mode-btn active" data-size="14">14×14</button>
+                      <button class="mode-btn" data-size="20">20×20</button>
+                    </div>
+                  </div>
+
+                  <div class="mode-section">
+                    <label>难度</label>
+                    <div class="mode-btns" id="diffGroup">
+                      <button class="mode-btn active" data-diff="easy">简单</button>
+                      <button class="mode-btn" data-diff="normal">普通</button>
+                      <button class="mode-btn" data-diff="hard">困难</button>
+                    </div>
+                  </div>
+
+                  <div class="mode-section">
+                    <label>权限</label>
+                    <div class="mode-btns">
+                      <button class="mode-btn" id="sensorPermBtn">开启重力</button>
+                      <button class="mode-btn" id="startRulesBtn">查看规则</button>
+                    </div>
+                    <p class="subtitle" id="sensorPermTip" style="margin-bottom:0;">iPhone 需要手动开启重力权限</p>
+                  </div>
+
+                  <button class="btn" id="startBtn">开始游戏</button>
+                </div>
               </div>
             </div>
-
-            <div class="mode-section">
-              <label>画布大小</label>
-              <div class="mode-btns" id="sizeGroup">
-                <button class="mode-btn" data-size="10">10×10</button>
-                <button class="mode-btn active" data-size="14">14×14</button>
-                <button class="mode-btn" data-size="20">20×20</button>
-              </div>
-            </div>
-
-            <div class="mode-section">
-              <label>难度</label>
-              <div class="mode-btns" id="diffGroup">
-                <button class="mode-btn active" data-diff="easy">简单</button>
-                <button class="mode-btn" data-diff="normal">普通</button>
-                <button class="mode-btn" data-diff="hard">困难</button>
-              </div>
-            </div>
-
-            <div class="mode-section">
-              <label>权限</label>
-              <div class="mode-btns">
-                <button class="mode-btn" id="sensorPermBtn">开启重力</button>
-                <button class="mode-btn" id="startRulesBtn">查看规则</button>
-              </div>
-              <p class="subtitle" id="sensorPermTip" style="margin-bottom:0;">iPhone 需要手动开启重力权限</p>
-            </div>
-
-            <button class="btn" id="startBtn">开始游戏</button>
           </div>
           <div id="pauseOverlay" class="hidden">
             <div id="pauseCard">
@@ -1083,6 +1131,9 @@
       }
 
       renderIdle();
+      document.getElementById('overlay').classList.add('menu');
+      window.addEventListener('resize', fitStartMenu);
+      fitStartMenu();
       ensureBgmTracks();
       if (!bgmPrimed) primeBgmTracks();
       syncAudioState();
@@ -1137,10 +1188,29 @@
             diffGroup.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             selectedDiff = btn.dataset.diff;
+            fitStartMenu();
           });
         });
       }
       updateSensorPermissionUI(ov);
+      fitStartMenu();
+    }
+
+    function fitStartMenu() {
+      const ov = document.getElementById('overlay');
+      if (!ov || !ov.classList.contains('menu')) return;
+      const card = document.getElementById('overlayCard');
+      const inner = document.getElementById('overlayInner');
+      if (!card || !inner) return;
+      inner.style.transform = 'none';
+      const availW = card.clientWidth - 28;
+      const availH = card.clientHeight - 28;
+      const contentW = inner.scrollWidth;
+      const contentH = inner.scrollHeight;
+      if (!contentW || !contentH) return;
+      let scale = Math.min(1, availW / contentW, availH / contentH);
+      scale = Math.max(0.60, scale);
+      inner.style.transform = `scale(${scale})`;
     }
 
     function initSensorPermissionState() {
@@ -1304,8 +1374,10 @@
       grid = Array.from({ length: selectedSize }, () => new Array(selectedSize).fill(0));
       const ov = document.getElementById('overlay');
       ov.innerHTML = startOverlayHTML;
+      ov.classList.add('menu');
       ov.classList.remove('hidden');
       bindStartOverlay();
+      fitStartMenu();
       updateRestartVisibility();
       updatePauseVisibility();
       updateInfoVisibility();
@@ -1911,7 +1983,9 @@
         document.getElementById('gameContainer').style.width  = canvas.width  + 'px';
         document.getElementById('gameContainer').style.height = canvas.height + 'px';
 
-        document.getElementById('overlay').classList.add('hidden');
+        const ov = document.getElementById('overlay');
+        ov.classList.remove('menu');
+        ov.classList.add('hidden');
         document.getElementById('deadOverlay').classList.add('hidden');
         document.getElementById('pauseSettingsRow').classList.add('hidden');
         gameMode = selectedMode;
@@ -3493,6 +3567,7 @@
     function showResultOverlay() {
       if (gameState !== 'dead') return;
       const ov = document.getElementById('overlay');
+      ov.classList.remove('menu');
       const mult = DIFF_CONFIG[selectedDiff].scoreMult || 1.0;
       const parts = scoreParts || {};
       const reasonHtml = lastGameOverReason ? `<p class="subtitle">${lastGameOverReason}</p>` : '';
