@@ -497,6 +497,24 @@
     #toast.show {
       opacity: 1;
     }
+    #scoreFloat {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 16;
+      pointer-events: none;
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(13, 17, 23, 0.55);
+      color: rgba(230,237,243,0.86);
+      font-size: 11px;
+      line-height: 1.55;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      white-space: pre-line;
+      max-width: min(240px, calc(100vw - 24px));
+    }
     #itemBar {
       display: flex;
       justify-content: center;
@@ -635,6 +653,7 @@
               <label>权限</label>
               <div class="mode-btns">
                 <button class="mode-btn" id="sensorPermBtn">开启重力</button>
+                <button class="mode-btn" id="startRulesBtn">查看规则</button>
               </div>
               <p class="subtitle" id="sensorPermTip" style="margin-bottom:0;">iPhone 需要手动开启重力权限</p>
             </div>
@@ -674,6 +693,7 @@
           </div>
           <div id="hint">📱 倾斜手机 / ⌨️ 方向键</div>
           <div id="toast"></div>
+          <div id="scoreFloat" class="hidden"></div>
         </div>
         <div id="itemBar" class="hidden"></div>
       </div>
@@ -876,6 +896,8 @@
     let aimCell = null;
     let screenShake = { t: 0, maxT: 0, amp: 0 };
     let screenFlash = { t: 0, maxT: 0, color: 'rgba(0,0,0,0)' };
+    let comboPop = { t: 0, maxT: 0, text: '' };
+    let scoreFloatOn = false;
     let pendingTarget = null;
     let pendingTargetPulseT = 0;
     let currentFillPct = 0;
@@ -963,12 +985,14 @@
         if (!t || !t.id) return;
         if (t.id === 'startBtn') { startGame(); e.preventDefault(); return; }
         if (t.id === 'sensorPermBtn') { requestSensorPermission(); e.preventDefault(); return; }
+        if (t.id === 'startRulesBtn') { toggleRulesPanel(); e.preventDefault(); return; }
       });
       overlay.addEventListener('touchend', e => {
         const t = e.target;
         if (!t || !t.id) return;
         if (t.id === 'startBtn') { startGame(); e.preventDefault(); return; }
         if (t.id === 'sensorPermBtn') { requestSensorPermission(); e.preventDefault(); return; }
+        if (t.id === 'startRulesBtn') { toggleRulesPanel(); e.preventDefault(); return; }
       }, { passive: false });
       document.getElementById('restartNowBtn').addEventListener('click', startGame);
       document.getElementById('restartNowBtn').addEventListener('touchend', e => { e.preventDefault(); startGame(); });
@@ -1334,25 +1358,27 @@
     }
 
     function toggleScorePanel() {
+      scoreFloatOn = !scoreFloatOn;
       const el = document.getElementById('panelScore');
-      if (!el) return;
-      el.classList.toggle('hidden');
-      if (!el.classList.contains('hidden')) {
-        refreshScorePanel();
-      }
+      if (el) el.classList.add('hidden');
+      refreshScorePanel();
     }
 
     function refreshScorePanel() {
-      const el = document.getElementById('panelScore');
-      if (!el || el.classList.contains('hidden')) return;
       const parts = scoreParts || {};
       const mult = DIFF_CONFIG[selectedDiff].scoreMult || 1.0;
-      el.innerHTML = `
-倍率 x${mult}<br>
-消除：${parts.clear || 0} · 放置：${parts.placement || 0} · 均衡：${parts.balance || 0}<br>
-道具获得：${parts.itemCollect || 0} · 道具使用：${parts.itemUse || 0}<br>
-消除总数：${clears} · 当前充满：${document.getElementById('fill')?.textContent || '0%'} · 最高充满：${maxFill}% · 道具使用：${itemUseCount}
+      const txt = `
+得分 ${score} · 倍率 x${mult}
+消除 ${parts.clear || 0} · 放置 ${parts.placement || 0} · 均衡 ${parts.balance || 0}
+道具 获得 ${parts.itemCollect || 0} · 使用 ${parts.itemUse || 0}
+消除数 ${clears} · 充满 ${document.getElementById('fill')?.textContent || '0%'} · 最高 ${maxFill}% · 道具使用 ${itemUseCount}
       `.trim();
+      const floatEl = document.getElementById('scoreFloat');
+      if (floatEl) {
+        const show = scoreFloatOn && gameState !== 'idle';
+        floatEl.classList.toggle('hidden', !show);
+        if (show) floatEl.textContent = txt;
+      }
     }
 
     function updateSettingsButtons() {
@@ -1823,6 +1849,7 @@
       score += points;
       scoreParts[part] = (scoreParts[part] || 0) + points;
       document.getElementById('score').textContent = score;
+      if (scoreFloatOn) refreshScorePanel();
       if (toastText) showToast(toastText, toastColor);
       if (showDelta) showScoreDelta(points);
       bumpScore();
@@ -2038,6 +2065,10 @@
       if (screenFlash.maxT > 0) {
         screenFlash.t += dt;
         if (screenFlash.t >= screenFlash.maxT) screenFlash = { t: 0, maxT: 0, color: 'rgba(0,0,0,0)' };
+      }
+      if (comboPop.maxT > 0) {
+        comboPop.t += dt;
+        if (comboPop.t >= comboPop.maxT) comboPop = { t: 0, maxT: 0, text: '' };
       }
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
@@ -2858,6 +2889,7 @@
         else if (removed === 2) playSfx('clear2');
         else if (removed === 3) playSfx('clear3');
         else playSfx('clear4');
+        if (removed >= 2) comboPop = { t: 0, maxT: 900, text: `Combo x${removed}!` };
         flashEffect();
       }
       return removed;
@@ -2951,6 +2983,35 @@
       addScorePart('balance', bonus, `均衡奖励 +${bonus}`, '#64ffda', true);
     }
 
+    function getLandingPreviewCell() {
+      if (!piece) return null;
+      if (gameState !== 'playing') return null;
+      if (pendingTarget) return null;
+      if (piece.isLitBomb) return null;
+      const speedMult = DIFF_CONFIG[selectedDiff].speedMult;
+      const sx = tiltToSpeed(Math.abs(tiltX), speedMult);
+      const sy = tiltToSpeed(Math.abs(tiltY), speedMult);
+      if (sx <= 0.001 && sy <= 0.001) return null;
+      const primary = (sx >= sy) ? 'x' : 'y';
+      const dx = tiltX < 0 ? -1 : 1;
+      const dy = tiltY < 0 ? -1 : 1;
+      let px = piece.x;
+      let py = piece.y;
+      for (let i = 0; i < COLS + ROWS + 10; i++) {
+        let moved = false;
+        if (primary === 'x' && sx > 0.001) {
+          const nx = px + dx;
+          if (!outOfBounds(nx, py, piece.shape) && !overlapsGrid(nx, py, piece.shape)) { px = nx; moved = true; }
+        } else if (primary === 'y' && sy > 0.001) {
+          const ny = py + dy;
+          if (!outOfBounds(px, ny, piece.shape) && !overlapsGrid(px, ny, piece.shape)) { py = ny; moved = true; }
+        }
+        if (!moved) break;
+      }
+      if (px === piece.x && py === piece.y) return null;
+      return { x: px, y: py };
+    }
+
     // ============== 渲染 ==============
     function render() {
       const now = performance.now();
@@ -3007,7 +3068,8 @@
       ctx.restore();
 
       // 中心十字虚线
-      ctx.strokeStyle = 'rgba(100,255,218,0.1)';
+      const gridPulse = 0.5 + 0.5 * Math.sin(now / 950);
+      ctx.strokeStyle = `rgba(100,255,218,${0.08 + 0.05 * gridPulse})`;
       ctx.setLineDash([4, 4]);
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -3021,7 +3083,7 @@
       ctx.setLineDash([]);
 
       // 网格线
-      ctx.strokeStyle = 'rgba(100,255,218,0.05)';
+      ctx.strokeStyle = `rgba(100,255,218,${0.035 + 0.025 * gridPulse})`;
       for (let i = 0; i <= COLS; i++) {
         ctx.beginPath();
         ctx.moveTo(i * CELL, 0);
@@ -3053,6 +3115,22 @@
             }
           }
         }
+      }
+
+      const preview = getLandingPreviewCell();
+      if (preview) {
+        ctx.save();
+        ctx.setLineDash([Math.max(6, CELL * 0.35), Math.max(4, CELL * 0.22)]);
+        ctx.strokeStyle = 'rgba(230,237,243,0.55)';
+        ctx.lineWidth = Math.max(1, CELL * 0.08);
+        for (const [px, py] of piece.shape) {
+          const x = preview.x + px;
+          const y = preview.y + py;
+          if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
+          ctx.strokeRect(x * CELL + 3, y * CELL + 3, CELL - 6, CELL - 6);
+        }
+        ctx.setLineDash([]);
+        ctx.restore();
       }
 
       if (pendingTarget && gameState === 'playing' && gameMode === 'items') {
@@ -3248,6 +3326,25 @@
         }
         ctx.globalAlpha = 1;
       }
+
+      if (comboPop.maxT > 0 && comboPop.text) {
+        const p = Math.min(1, comboPop.t / comboPop.maxT);
+        const a = (1 - p);
+        const s = 1 + 0.22 * (1 - p);
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.translate(canvas.width / 2, canvas.height * 0.18);
+        ctx.scale(s, s);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(0,0,0,0.45)';
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = 'rgba(255,217,61,0.96)';
+        ctx.font = `${Math.max(18, Math.floor(CELL * 0.9))}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+        ctx.fillText(comboPop.text, 0, 0);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
       ctx.restore();
       if (screenFlash.maxT > 0) {
         const p = Math.min(1, screenFlash.t / screenFlash.maxT);
@@ -3274,19 +3371,44 @@
       return false;
     }
 
+    function roundRectPath(x, y, w, h, r) {
+      const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+      ctx.beginPath();
+      ctx.moveTo(x + rr, y);
+      ctx.arcTo(x + w, y, x + w, y + h, rr);
+      ctx.arcTo(x + w, y + h, x, y + h, rr);
+      ctx.arcTo(x, y + h, x, y, rr);
+      ctx.arcTo(x, y, x + w, y, rr);
+      ctx.closePath();
+    }
+
     function drawBlock(x, y, color, alpha = 1, glow = false, label = '') {
+      const left = x * CELL + 1;
+      const top = y * CELL + 1;
+      const w = CELL - 2;
+      const h = CELL - 2;
+      const r = Math.max(4, CELL * 0.18);
+      ctx.save();
       ctx.globalAlpha = alpha;
       if (glow) {
         ctx.shadowColor = color;
+        ctx.shadowBlur = 12;
+      } else {
+        ctx.shadowColor = 'rgba(0,0,0,0.30)';
         ctx.shadowBlur = 10;
       }
+      roundRectPath(left, top, w, h, r);
       ctx.fillStyle = color;
-      ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
-      // 高光
-      ctx.fillStyle = 'rgba(255,255,255,0.22)';
-      ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, Math.max(3, (CELL - 2) / 4));
+      ctx.fill();
+      ctx.clip();
+      const g = ctx.createLinearGradient(left, top, left + w, top + h);
+      g.addColorStop(0, 'rgba(255,255,255,0.22)');
+      g.addColorStop(0.45, 'rgba(255,255,255,0.06)');
+      g.addColorStop(1, 'rgba(0,0,0,0.18)');
+      ctx.fillStyle = g;
+      ctx.fillRect(left, top, w, h);
+      ctx.restore();
       if (label) {
-        ctx.shadowBlur = 0;
         ctx.globalAlpha = 1;
         ctx.fillStyle = 'rgba(13, 17, 23, 0.9)';
         ctx.font = `${Math.max(10, Math.floor(CELL * 0.42))}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
@@ -3294,27 +3416,37 @@
         ctx.textBaseline = 'middle';
         ctx.fillText(label, x * CELL + CELL / 2, y * CELL + CELL / 2);
       }
-      ctx.shadowBlur = 0;
       ctx.globalAlpha = 1;
     }
 
     function drawBlockScaled(x, y, color, scale = 1, alpha = 1, glow = false, label = '') {
-      ctx.globalAlpha = alpha;
-      if (glow) {
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 10;
-      }
       const cx = x * CELL + CELL / 2;
       const cy = y * CELL + CELL / 2;
       const s = (CELL - 2) * scale;
       const left = cx - s / 2;
       const top = cy - s / 2;
+      const r = Math.max(4, CELL * 0.18) * Math.min(1, scale);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      if (glow) {
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 12;
+      } else {
+        ctx.shadowColor = 'rgba(0,0,0,0.30)';
+        ctx.shadowBlur = 10;
+      }
+      roundRectPath(left, top, s, s, r);
       ctx.fillStyle = color;
+      ctx.fill();
+      ctx.clip();
+      const g = ctx.createLinearGradient(left, top, left + s, top + s);
+      g.addColorStop(0, 'rgba(255,255,255,0.22)');
+      g.addColorStop(0.45, 'rgba(255,255,255,0.06)');
+      g.addColorStop(1, 'rgba(0,0,0,0.18)');
+      ctx.fillStyle = g;
       ctx.fillRect(left, top, s, s);
-      ctx.fillStyle = 'rgba(255,255,255,0.22)';
-      ctx.fillRect(left, top, s, Math.max(3, s / 4));
+      ctx.restore();
       if (label) {
-        ctx.shadowBlur = 0;
         ctx.globalAlpha = 1;
         ctx.fillStyle = 'rgba(13, 17, 23, 0.9)';
         ctx.font = `${Math.max(10, Math.floor(CELL * 0.42))}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
@@ -3322,7 +3454,6 @@
         ctx.textBaseline = 'middle';
         ctx.fillText(label, cx, cy);
       }
-      ctx.shadowBlur = 0;
       ctx.globalAlpha = 1;
     }
 
