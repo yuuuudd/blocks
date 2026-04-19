@@ -290,12 +290,13 @@
       inset: 0;
       padding: 18px;
       overflow: hidden;
-      touch-action: none;
+      touch-action: manipulation;
       justify-content: center;
       background: radial-gradient(circle at 30% 10%, rgba(100,255,218,0.12), transparent 42%),
                   radial-gradient(circle at 70% 30%, rgba(255,107,107,0.10), transparent 46%),
                   rgba(13, 17, 23, 0.92);
       z-index: 220;
+      pointer-events: auto;
     }
     #overlayCard {
       width: min(92vw, calc(92vh * 9 / 16));
@@ -314,6 +315,7 @@
       align-items: center;
       justify-content: center;
       padding: 16px 0;
+      pointer-events: auto;
     }
     #overlayInner {
       width: 100%;
@@ -323,12 +325,27 @@
       justify-content: flex-start;
       transform-origin: top center;
       will-change: transform;
+      pointer-events: auto;
+      transform: translateZ(0);
     }
     #overlay * {
       touch-action: pan-y;
     }
     #overlay.menu * {
-      touch-action: none;
+      touch-action: manipulation;
+    }
+    #startTips {
+      width: 100%;
+      padding: 0 20px;
+      margin-bottom: 12px;
+      color: rgba(230,237,243,0.78);
+      font-size: 12px;
+      line-height: 1.55;
+      text-align: center;
+    }
+    #startTips strong {
+      color: rgba(255,217,61,0.95);
+      font-weight: 900;
     }
     #overlay h1 {
       font-size: 26px;
@@ -373,6 +390,8 @@
       border-radius: 20px;
       cursor: pointer;
       transition: all 0.2s;
+      pointer-events: auto;
+      touch-action: manipulation;
     }
     .mode-btn.active {
       color: #0d1117;
@@ -390,6 +409,8 @@
       border-radius: 30px;
       cursor: pointer;
       transition: transform 0.2s;
+      pointer-events: auto;
+      touch-action: manipulation;
     }
     .btn:active { transform: scale(0.95); }
     #overlay .btn {
@@ -540,23 +561,54 @@
     #toast.show {
       opacity: 1;
     }
-    #scoreFloat {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 16;
-      pointer-events: none;
-      padding: 8px 10px;
-      border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(13, 17, 23, 0.55);
-      color: rgba(230,237,243,0.86);
-      font-size: 11px;
-      line-height: 1.55;
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
+    #scoreModal {
+      position: fixed;
+      inset: 0;
+      background: rgba(13, 17, 23, 0.62);
+      z-index: 330;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    #scoreCard {
+      width: min(560px, calc(100vw - 24px));
+      max-height: min(78vh, 720px);
+      overflow: auto;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(13,17,23,0.96);
+      color: #e6edf3;
+      padding: 14px;
+      box-shadow: 0 16px 36px rgba(0,0,0,0.45);
+    }
+    #scoreHead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    #scoreTitle {
+      font-size: 16px;
+      font-weight: 900;
+      color: #64ffda;
+    }
+    #scoreCloseBtn {
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.08);
+      color: #e6edf3;
+      border-radius: 10px;
+      height: 34px;
+      padding: 0 12px;
+      cursor: pointer;
+      font-weight: 800;
+    }
+    #scoreBody {
+      font-size: 13px;
+      line-height: 1.7;
+      color: rgba(230,237,243,0.92);
       white-space: pre-line;
-      max-width: min(240px, calc(100vw - 24px));
     }
     #itemBar {
       display: flex;
@@ -609,7 +661,7 @@
       position: fixed;
       inset: 0;
       background: rgba(13, 17, 23, 0.62);
-      z-index: 120;
+      z-index: 320;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -668,6 +720,10 @@
                 <div id="overlayInner">
                   <h1>重力方块</h1>
                   <p class="subtitle">方块从中央生成<br>倾斜手机 / 方向键控制<br>贴边可滑行，将要碰到才停下</p>
+                  <div id="startTips">
+                    建议开启<strong>屏幕方向锁定</strong>（防止误旋转）<br>
+                    建议将系统设置为<strong>长时间不息屏</strong>（避免中途黑屏暂停）
+                  </div>
 
                   <div class="mode-section">
                     <label>模式</label>
@@ -742,7 +798,6 @@
           </div>
           <div id="hint">📱 倾斜手机 / ⌨️ 方向键</div>
           <div id="toast"></div>
-          <div id="scoreFloat" class="hidden"></div>
         </div>
         <div id="itemBar" class="hidden"></div>
       </div>
@@ -796,6 +851,15 @@
         <button id="rulesCloseBtn">关闭</button>
       </div>
       <div id="rulesBody"></div>
+    </div>
+  </div>
+  <div id="scoreModal" class="hidden">
+    <div id="scoreCard">
+      <div id="scoreHead">
+        <div id="scoreTitle">得分说明</div>
+        <button id="scoreCloseBtn">关闭</button>
+      </div>
+      <div id="scoreBody"></div>
     </div>
   </div>
 
@@ -946,7 +1010,6 @@
     let screenShake = { t: 0, maxT: 0, amp: 0 };
     let screenFlash = { t: 0, maxT: 0, color: 'rgba(0,0,0,0)' };
     let comboPop = { t: 0, maxT: 0, text: '' };
-    let scoreFloatOn = false;
     let pendingTarget = null;
     let pendingTargetPulseT = 0;
     let currentFillPct = 0;
@@ -958,6 +1021,7 @@
     let sensorPermissionState = 'unknown';
     let lastGameOverReason = '';
     let pausedByRules = false;
+    let menuTapLockUntil = 0;
 
     function applyKeyboardTilt() {
       if (pendingTarget) {
@@ -1028,21 +1092,6 @@
         updateAimFromClient(t.clientX, t.clientY);
       }, { passive: true });
 
-      const overlay = document.getElementById('overlay');
-      overlay.addEventListener('click', e => {
-        const t = e.target;
-        if (!t || !t.id) return;
-        if (t.id === 'startBtn') { startGame(); e.preventDefault(); return; }
-        if (t.id === 'sensorPermBtn') { requestSensorPermission(); e.preventDefault(); return; }
-        if (t.id === 'startRulesBtn') { toggleRulesPanel(); e.preventDefault(); return; }
-      });
-      overlay.addEventListener('touchend', e => {
-        const t = e.target;
-        if (!t || !t.id) return;
-        if (t.id === 'startBtn') { startGame(); e.preventDefault(); return; }
-        if (t.id === 'sensorPermBtn') { requestSensorPermission(); e.preventDefault(); return; }
-        if (t.id === 'startRulesBtn') { toggleRulesPanel(); e.preventDefault(); return; }
-      }, { passive: false });
       document.getElementById('restartNowBtn').addEventListener('click', startGame);
       document.getElementById('restartNowBtn').addEventListener('touchend', e => { e.preventDefault(); startGame(); });
       document.getElementById('pauseBtn').addEventListener('click', togglePause);
@@ -1089,6 +1138,11 @@
       });
       document.getElementById('scoreBtn').addEventListener('click', toggleScorePanel);
       document.getElementById('scoreBtn').addEventListener('touchend', e => { e.preventDefault(); toggleScorePanel(); });
+      document.getElementById('scoreCloseBtn').addEventListener('click', closeScoreModal);
+      document.getElementById('scoreCloseBtn').addEventListener('touchend', e => { e.preventDefault(); closeScoreModal(); });
+      document.getElementById('scoreModal').addEventListener('click', e => {
+        if (e.target && e.target.id === 'scoreModal') closeScoreModal();
+      });
       document.getElementById('soundBtn').addEventListener('click', toggleSound);
       document.getElementById('soundBtn').addEventListener('touchend', e => { e.preventDefault(); toggleSound(); });
       document.getElementById('vibrateBtn').addEventListener('click', toggleVibrate);
@@ -1193,6 +1247,26 @@
         });
       }
       updateSensorPermissionUI(ov);
+      const startBtn = ov.querySelector('#startBtn');
+      const sensorBtn = ov.querySelector('#sensorPermBtn');
+      const rulesBtn = ov.querySelector('#startRulesBtn');
+      const bindTap = (el, fn) => {
+        if (!el) return;
+        const fire = e => {
+          const now = performance.now();
+          if (now < menuTapLockUntil) return;
+          menuTapLockUntil = now + 450;
+          e.preventDefault();
+          e.stopPropagation();
+          fn();
+        };
+        el.addEventListener('pointerdown', fire, { passive: false });
+        el.addEventListener('touchstart', fire, { passive: false });
+        el.addEventListener('click', fire);
+      };
+      bindTap(startBtn, startGame);
+      bindTap(sensorBtn, requestSensorPermission);
+      bindTap(rulesBtn, toggleRulesPanel);
       fitStartMenu();
     }
 
@@ -1431,10 +1505,15 @@
     }
 
     function toggleScorePanel() {
-      scoreFloatOn = !scoreFloatOn;
-      const el = document.getElementById('panelScore');
-      if (el) el.classList.add('hidden');
-      refreshScorePanel();
+      const modal = document.getElementById('scoreModal');
+      if (!modal) return;
+      const willOpen = modal.classList.contains('hidden');
+      if (willOpen) {
+        refreshScorePanel();
+        modal.classList.remove('hidden');
+      } else {
+        closeScoreModal();
+      }
     }
 
     function refreshScorePanel() {
@@ -1446,12 +1525,14 @@
 道具 获得 ${parts.itemCollect || 0} · 使用 ${parts.itemUse || 0}
 消除数 ${clears} · 充满 ${document.getElementById('fill')?.textContent || '0%'} · 最高 ${maxFill}% · 道具使用 ${itemUseCount}
       `.trim();
-      const floatEl = document.getElementById('scoreFloat');
-      if (floatEl) {
-        const show = scoreFloatOn && gameState !== 'idle';
-        floatEl.classList.toggle('hidden', !show);
-        if (show) floatEl.textContent = txt;
-      }
+      const body = document.getElementById('scoreBody');
+      if (body) body.textContent = txt;
+    }
+
+    function closeScoreModal() {
+      const modal = document.getElementById('scoreModal');
+      if (!modal || modal.classList.contains('hidden')) return;
+      modal.classList.add('hidden');
     }
 
     function updateSettingsButtons() {
@@ -1922,7 +2003,7 @@
       score += points;
       scoreParts[part] = (scoreParts[part] || 0) + points;
       document.getElementById('score').textContent = score;
-      if (scoreFloatOn) refreshScorePanel();
+      refreshScorePanel();
       if (toastText) showToast(toastText, toastColor);
       if (showDelta) showScoreDelta(points);
       bumpScore();
