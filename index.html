@@ -696,6 +696,14 @@
                   </div>
 
                   <div class="mode-section">
+                    <label>镜像</label>
+                    <div class="mode-btns" id="mirrorGroup">
+                      <button class="mode-btn active" data-mirror="off">关闭</button>
+                      <button class="mode-btn" data-mirror="on">开启</button>
+                    </div>
+                  </div>
+
+                  <div class="mode-section">
                     <label>权限</label>
                     <div class="mode-btns">
                       <button class="mode-btn" id="sensorPermBtn">开启重力</button>
@@ -958,6 +966,8 @@
     let sensorPermissionState = 'unknown';
     let lastGameOverReason = '';
     let pausedByRules = false;
+    let selectedMirror = false;
+    let mirrorMode = false;
 
     function applyKeyboardTilt() {
       if (pendingTarget) {
@@ -991,8 +1001,9 @@
         }
         if (!pendingTarget) return;
         const rect = canvas.getBoundingClientRect();
-        const x = Math.floor((e.clientX - rect.left) / CELL);
+        let x = Math.floor((e.clientX - rect.left) / CELL);
         const y = Math.floor((e.clientY - rect.top) / CELL);
+        if (mirrorMode) x = COLS - 1 - x;
         usePendingItemAtCell(x, y);
         e.preventDefault();
       });
@@ -1006,8 +1017,9 @@
         const t = e.changedTouches && e.changedTouches[0];
         if (!t) return;
         const rect = canvas.getBoundingClientRect();
-        const x = Math.floor((t.clientX - rect.left) / CELL);
+        let x = Math.floor((t.clientX - rect.left) / CELL);
         const y = Math.floor((t.clientY - rect.top) / CELL);
+        if (mirrorMode) x = COLS - 1 - x;
         usePendingItemAtCell(x, y);
         e.preventDefault();
       }, { passive: false });
@@ -1015,8 +1027,9 @@
       const updateAimFromClient = (clientX, clientY) => {
         if (!pendingTarget) { aimCell = null; return; }
         const rect = canvas.getBoundingClientRect();
-        const x = Math.floor((clientX - rect.left) / CELL);
+        let x = Math.floor((clientX - rect.left) / CELL);
         const y = Math.floor((clientY - rect.top) / CELL);
+        if (mirrorMode) x = COLS - 1 - x;
         const valid = isUsableCellForItem(pendingTarget.itemTypeId, x, y);
         aimCell = { x, y, valid };
       };
@@ -1160,6 +1173,7 @@
       const modeGroup = ov.querySelector('#modeGroup');
       const sizeGroup = ov.querySelector('#sizeGroup');
       const diffGroup = ov.querySelector('#diffGroup');
+      const mirrorGroup = ov.querySelector('#mirrorGroup');
 
       if (modeGroup) {
         modeGroup.querySelectorAll('.mode-btn').forEach(btn => {
@@ -1189,6 +1203,16 @@
             btn.classList.add('active');
             selectedDiff = btn.dataset.diff;
             fitStartMenu();
+          });
+        });
+      }
+      if (mirrorGroup) {
+        mirrorGroup.querySelectorAll('.mode-btn').forEach(btn => {
+          btn.classList.toggle('active', (btn.dataset.mirror === 'on') === selectedMirror);
+          btn.addEventListener('click', () => {
+            mirrorGroup.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            selectedMirror = btn.dataset.mirror === 'on';
           });
         });
       }
@@ -1412,6 +1436,10 @@
 
 【点燃炸弹事件】
 事件触发后，点燃炸弹从正中央生成，可在3秒内移动；到时在当前位置爆炸3×3。
+
+【镜像模式】
+画布水平翻转，倾斜方向不变——向右倾斜，方块在屏幕上向左移动。
+操控反转带来额外挑战，适合高手进阶。
 
 【得分】
 得分由：放置分 + 消除分 + 均衡分 + 道具获得/使用分组成。
@@ -1989,7 +2017,9 @@
         document.getElementById('deadOverlay').classList.add('hidden');
         document.getElementById('pauseSettingsRow').classList.add('hidden');
         gameMode = selectedMode;
-        document.getElementById('modeLabel').textContent = `${COLS}×${ROWS} · ${GAME_MODE[gameMode].label} · ${DIFF_CONFIG[selectedDiff].label}`;
+        mirrorMode = selectedMirror;
+        const mirrorTag = mirrorMode ? ' · 镜像' : '';
+        document.getElementById('modeLabel').textContent = `${COLS}×${ROWS} · ${GAME_MODE[gameMode].label} · ${DIFF_CONFIG[selectedDiff].label}${mirrorTag}`;
 
         grid = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
         score = 0;
@@ -2030,6 +2060,13 @@
     }
 
     function maybeShowFirstTimeHints() {
+      if (mirrorMode) {
+        const mk = 'grav_mirror_hint_v1';
+        if (!localStorage.getItem(mk)) {
+          localStorage.setItem(mk, '1');
+          setTimeout(() => showToast('镜像模式：操控方向反转！', '#c792ea', 1400), 600);
+        }
+      }
       const key = 'grav_tutorial_v1';
       if (localStorage.getItem(key)) return;
       localStorage.setItem(key, '1');
@@ -2040,6 +2077,7 @@
         { t: 3600, text: '点燃炸弹 3 秒爆，注意闪烁与警告圈', color: '#ff6b6b' },
       ];
       for (const it of seq) setTimeout(() => showToast(it.text, it.color, 1100), it.t);
+      if (mirrorMode) setTimeout(() => showToast('镜像模式：操控方向反转！', '#c792ea', 1400), 4800);
     }
 
     function getCanvasBounds() {
@@ -3100,6 +3138,23 @@
       }
       ctx.save();
       ctx.translate(ox, oy);
+      // 镜像模式：翻转整个画布
+      if (mirrorMode) {
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+      }
+      // 镜像模式下文本需再翻转以保持可读
+      const origFillText = ctx.fillText.bind(ctx);
+      if (mirrorMode) {
+        ctx.fillText = function(text, x, y, maxWidth) {
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.scale(-1, 1);
+          ctx.translate(-x, -y);
+          origFillText(text, x, y, maxWidth);
+          ctx.restore();
+        };
+      }
       ctx.fillStyle = '#0d1117';
       ctx.fillRect(-40, -40, canvas.width + 80, canvas.height + 80);
 
