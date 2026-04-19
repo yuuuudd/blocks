@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gravity Blocks — Logo Design Exploration</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background: #0A0A0F;
+            color: #E0E0E0;
+            overflow-x: hidden;
+        }
+
+        .font-mono { font-family: 'JetBrains Mono', 'Courier New', monospace; }
+
+        /* Subtle grain texture */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.04'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        html { scroll-behavior: smooth; }
+
+        .logo-card {
+            transition: all 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .logo-card:hover {
+            transform: translateY(-6px);
+        }
+
+        .logo-canvas {
+            position: relative;
+            transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* Neon aura on hover */
+        .logo-aura {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, rgba(0,240,255,0.15) 0%, rgba(255,0,229,0.08) 40%, transparent 70%);
+            border-radius: 50%;
+            transform: scale(0.5);
+            opacity: 0;
+            transition: all 1s cubic-bezier(0.16, 1, 0.3, 1);
+            filter: blur(40px);
+            pointer-events: none;
+        }
+        .logo-card:hover .logo-aura {
+            transform: scale(1);
+            opacity: 1;
+        }
+
+        .divider-line {
+            width: 0;
+            height: 1px;
+            background: linear-gradient(90deg, #00F0FF, #7B2FFF, #FF00E5);
+            opacity: 0.5;
+            transition: width 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .logo-card:hover .divider-line {
+            width: 100%;
+        }
+
+        .tracking-ultra-wide { letter-spacing: 0.2em; }
+        .text-balance { text-wrap: balance; }
+
+        /* Neon text glow */
+        .neon-text {
+            background: linear-gradient(135deg, #00F0FF, #7B2FFF, #FF00E5);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Dark card background */
+        .card-bg {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState } = React;
+
+        const logos = [
+            {
+                title: "TILT CUBE",
+                subtitle: "倾斜方块",
+                philosophy: "一个微微倾斜的方块，暗示重力失衡的瞬间。极简到只有一个元素——不需要更多。内偏的重心点强化了\"即将倒下\"的张力。",
+                svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="ng1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#00F0FF"/><stop offset="100%" stop-color="#FF00E5"/></linearGradient></defs><g transform="rotate(-12, 50, 50)"><rect x="28" y="28" width="44" height="44" rx="6" ry="6" fill="none" stroke="url(#ng1)" stroke-width="4"/><circle cx="44" cy="58" r="5" fill="url(#ng1)" opacity="0.9"/></g></svg>`
+            },
+            {
+                title: "FALLING GRID",
+                subtitle: "坠落点阵",
+                philosophy: "圆角方块组成的松散网格，从上到下透明度递增。越往下越实——方块正在坠落、正在落位。散落的碎片脱离网格，增强动感。",
+                svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="ng2" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#00F0FF"/><stop offset="100%" stop-color="#FF00E5"/></linearGradient></defs><g fill="url(#ng2)"><rect x="22" y="12" width="12" height="12" rx="3" opacity="0.2"/><rect x="38" y="12" width="12" height="12" rx="3" opacity="0.15"/><rect x="54" y="12" width="12" height="12" rx="3" opacity="0.1"/><rect x="30" y="30" width="12" height="12" rx="3" opacity="0.5"/><rect x="46" y="30" width="12" height="12" rx="3" opacity="0.45"/><rect x="22" y="48" width="12" height="12" rx="3" opacity="0.8"/><rect x="38" y="48" width="12" height="12" rx="3" opacity="0.85"/><rect x="54" y="48" width="12" height="12" rx="3" opacity="0.75"/><rect x="30" y="66" width="12" height="12" rx="3" opacity="1"/><rect x="46" y="66" width="12" height="12" rx="3" opacity="1"/><rect x="62" y="66" width="12" height="12" rx="3" opacity="0.95"/><rect x="66" y="50" width="8" height="8" rx="2" opacity="0.4" transform="rotate(15, 70, 54)"/><rect x="18" y="72" width="6" height="6" rx="1.5" opacity="0.3" transform="rotate(-10, 21, 75)"/></g></svg>`
+            },
+            {
+                title: "RAIN LINES",
+                subtitle: "重力雨线",
+                philosophy: "水平线条被圆形裁切，上疏下密——这就是重力加速度的可视化。偶尔断裂的线条暗示方块间的间隙，底部的实心点是重力奇点。",
+                svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="ng3" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#00F0FF"/><stop offset="50%" stop-color="#7B2FFF"/><stop offset="100%" stop-color="#FF00E5"/></linearGradient><clipPath id="cc3"><circle cx="50" cy="50" r="34"/></clipPath></defs><circle cx="50" cy="50" r="36" fill="none" stroke="url(#ng3)" stroke-width="1.5" opacity="0.4"/><g clip-path="url(#cc3)" stroke="url(#ng3)" stroke-linecap="round"><line x1="10" y1="24" x2="90" y2="24" stroke-width="1" opacity="0.25"/><line x1="10" y1="30" x2="90" y2="30" stroke-width="1.2" opacity="0.3"/><line x1="10" y1="36" x2="90" y2="36" stroke-width="1.5" opacity="0.35"/><line x1="10" y1="42" x2="90" y2="42" stroke-width="2" opacity="0.5"/><line x1="10" y1="48" x2="90" y2="48" stroke-width="2.5" opacity="0.65"/><line x1="10" y1="54" x2="90" y2="54" stroke-width="3" opacity="0.75"/><line x1="10" y1="60" x2="90" y2="60" stroke-width="2.5" opacity="0.85"/><line x1="10" y1="66" x2="90" y2="66" stroke-width="2" opacity="0.9"/><line x1="10" y1="72" x2="90" y2="72" stroke-width="2.5" opacity="1"/></g><circle cx="50" cy="56" r="3" fill="url(#ng3)"/></svg>`
+            },
+            {
+                title: "PUNCHED BLOCK",
+                subtitle: "镂空方块",
+                philosophy: "实心方块被不对称的圆孔打穿——这就是消行的瞬间。负空间才是主角：那些空白处，正是方块消失后留下的痕迹。",
+                svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="ng4" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#00F0FF"/><stop offset="100%" stop-color="#FF00E5"/></linearGradient><clipPath id="bc4"><rect x="22" y="22" width="56" height="56" rx="8"/></clipPath></defs><rect x="22" y="22" width="56" height="56" rx="8" fill="url(#ng4)" opacity="0.9"/><g clip-path="url(#bc4)"><circle cx="38" cy="38" r="10" fill="#0A0A0F"/><circle cx="62" cy="58" r="7" fill="#0A0A0F"/><circle cx="52" cy="44" r="4" fill="#0A0A0F" opacity="0.6"/><circle cx="35" cy="62" r="5" fill="#0A0A0F" opacity="0.8"/></g></svg>`
+            },
+            {
+                title: "SPIRAL GRAVITY",
+                subtitle: "螺旋坍缩",
+                philosophy: "方块沿螺旋轨迹向中心坍缩——越靠近核心越小、越浓、越亮。外围的方块还在缓慢旋转，核心已经是高密度的奇点。这就是重力。",
+                svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="ng5" x1="100%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#00F0FF"/><stop offset="50%" stop-color="#7B2FFF"/><stop offset="100%" stop-color="#FF00E5"/></linearGradient></defs><g fill="url(#ng5)"><rect x="72" y="16" width="9" height="9" rx="2" opacity="0.25" transform="rotate(15, 76.5, 20.5)"/><rect x="78" y="38" width="8" height="8" rx="2" opacity="0.3" transform="rotate(50, 82, 42)"/><rect x="68" y="62" width="8" height="8" rx="2" opacity="0.4" transform="rotate(85, 72, 66)"/><rect x="50" y="72" width="7" height="7" rx="1.5" opacity="0.55" transform="rotate(130, 53.5, 75.5)"/><rect x="28" y="64" width="7" height="7" rx="1.5" opacity="0.65" transform="rotate(170, 31.5, 67.5)"/><rect x="20" y="44" width="6" height="6" rx="1.5" opacity="0.7" transform="rotate(210, 23, 47)"/><rect x="28" y="28" width="6" height="6" rx="1.5" opacity="0.8" transform="rotate(260, 31, 31)"/><rect x="40" y="22" width="5" height="5" rx="1" opacity="0.85" transform="rotate(300, 42.5, 24.5)"/><circle cx="50" cy="48" r="5" opacity="1"/></g></svg>`
+            },
+            {
+                title: "NEON STACK",
+                subtitle: "霓虹堆叠",
+                philosophy: "三层方块错位堆叠，青-紫-粉三色渐变——这就是游戏本身的视觉 DNA。每层微微倾斜，散落的像素碎片是霓虹世界的残影。最\"像素霓虹\"的方案。",
+                svg: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="nc" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#00F0FF" stop-opacity="0.15"/><stop offset="100%" stop-color="#00F0FF" stop-opacity="0.25"/></linearGradient><linearGradient id="np" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#7B2FFF" stop-opacity="0.3"/><stop offset="100%" stop-color="#7B2FFF" stop-opacity="0.4"/></linearGradient><linearGradient id="nk" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#FF00E5" stop-opacity="0.5"/><stop offset="100%" stop-color="#FF00E5" stop-opacity="0.65"/></linearGradient><filter id="g6"><feGaussianBlur stdDeviation="1.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><rect x="18" y="52" width="48" height="20" rx="4" fill="url(#nc)" stroke="#00F0FF" stroke-width="1.5" stroke-opacity="0.4" transform="rotate(-3, 42, 62)"/><rect x="28" y="36" width="42" height="18" rx="4" fill="url(#np)" stroke="#7B2FFF" stroke-width="1.5" stroke-opacity="0.5" transform="rotate(2, 49, 45)"/><rect x="36" y="22" width="36" height="16" rx="4" fill="url(#nk)" stroke="#FF00E5" stroke-width="1.5" stroke-opacity="0.7" transform="rotate(-5, 54, 30)" filter="url(#g6)"/><g fill="#00F0FF" opacity="0.6"><rect x="70" y="56" width="4" height="4" rx="1"/><rect x="76" y="60" width="3" height="3" rx="0.5" opacity="0.4"/><rect x="14" y="44" width="3" height="3" rx="0.5" opacity="0.3"/></g><g fill="#FF00E5" opacity="0.5"><rect x="66" y="30" width="3" height="3" rx="0.5"/><rect x="26" y="68" width="4" height="4" rx="1" opacity="0.3"/></g></svg>`
+            }
+        ];
+
+        const LogoShowcase = () => {
+            const [selected, setSelected] = useState(null);
+
+            return (
+                <div className="min-h-screen flex flex-col items-center py-16 px-6">
+
+                    {/* Header */}
+                    <div className="text-center mb-16 max-w-3xl">
+                        <h1 className="text-5xl md:text-7xl font-extralight tracking-wider mb-4 neon-text">
+                            GRAVITY BLOCKS
+                        </h1>
+                        <p className="font-mono text-xs opacity-40 uppercase tracking-ultra-wide mb-6">
+                            Logo Design Exploration &middot; 6 Variants
+                        </p>
+                        <p className="text-sm opacity-50 leading-relaxed max-w-lg mx-auto">
+                            基于三个核心概念生成：方块 / 重力下坠 / 霓虹。每个变体从不同角度诠释"重力方块"的视觉身份。
+                        </p>
+                        <div className="w-16 h-[1px] mx-auto mt-8 opacity-20" style={{background: 'linear-gradient(90deg, #00F0FF, #FF00E5)'}}></div>
+                    </div>
+
+                    {/* Logo Grid */}
+                    <div className="max-w-7xl w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 mb-24">
+                        {logos.map((logo, index) => (
+                            <div
+                                key={index}
+                                className={`flex flex-col items-center logo-card cursor-pointer card-bg p-8 ${selected === index ? 'ring-1' : ''}`}
+                                style={selected === index ? {ringColor: 'rgba(0,240,255,0.3)'} : {}}
+                                onClick={() => setSelected(selected === index ? null : index)}
+                            >
+                                {/* Logo Canvas */}
+                                <div className="w-48 h-48 mb-8 flex items-center justify-center relative">
+                                    <div className="logo-aura"></div>
+                                    <div className="w-28 h-28 relative z-10 logo-canvas"
+                                         dangerouslySetInnerHTML={{__html: logo.svg}} />
+                                </div>
+
+                                {/* Text */}
+                                <div className="text-center w-full">
+                                    <h2 className="text-lg font-medium tracking-wider mb-1 neon-text">
+                                        {logo.title}
+                                    </h2>
+                                    <h3 className="text-xs font-mono opacity-40 tracking-widest mb-4">
+                                        {logo.subtitle}
+                                    </h3>
+                                    <p className="text-sm leading-relaxed opacity-60 text-left font-light text-balance">
+                                        {logo.philosophy}
+                                    </p>
+                                </div>
+
+                                {/* Divider */}
+                                <div className="divider-line mt-6 mx-auto w-full"></div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Usage Guide */}
+                    <div className="max-w-4xl w-full card-bg p-10 mb-16">
+                        <h2 className="text-xl font-medium tracking-wider mb-6 neon-text">USAGE GUIDE</h2>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-sm opacity-70 leading-relaxed">
+                            <div>
+                                <p className="font-mono text-xs opacity-50 mb-2">FAVICON</p>
+                                <p>推荐 Variant 01 (Tilt Cube) 或 Variant 04 (Punched Block)。极简轮廓在 16x16 下仍可辨识。</p>
+                            </div>
+                            <div>
+                                <p className="font-mono text-xs opacity-50 mb-2">GITHUB AVATAR</p>
+                                <p>推荐 Variant 06 (Neon Stack) 或 Variant 05 (Spiral Gravity)。色彩丰富，缩略图下醒目。</p>
+                            </div>
+                            <div>
+                                <p className="font-mono text-xs opacity-50 mb-2">IN-GAME BRAND</p>
+                                <p>推荐 Variant 06 (Neon Stack)。与游戏霓虹画风完全一致，无缝融入 UI。</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="mt-16 max-w-2xl text-center">
+                        <p className="font-mono text-xs opacity-30 uppercase tracking-ultra-wide leading-loose">
+                            Gravity Blocks &middot; Logo Generator &middot; 2026
+                        </p>
+                    </div>
+
+                </div>
+            );
+        };
+
+        ReactDOM.render(<LogoShowcase />, document.getElementById('root'));
+    </script>
+</body>
+</html>

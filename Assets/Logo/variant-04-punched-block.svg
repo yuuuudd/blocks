@@ -1,0 +1,22 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Variant 04: Punched Block — 实心方块被圆孔打穿，负空间设计 -->
+  <!-- 设计理念：实心方块 + 不对称的圆形镂空，负空间营造"破碎/消行"感 -->
+  <defs>
+    <linearGradient id="neon-g4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F0FF"/>
+      <stop offset="100%" stop-color="#FF00E5"/>
+    </linearGradient>
+    <clipPath id="block-clip4">
+      <rect x="22" y="22" width="56" height="56" rx="8"/>
+    </clipPath>
+  </defs>
+  <!-- 实心方块 -->
+  <rect x="22" y="22" width="56" height="56" rx="8" fill="url(#neon-g4)" opacity="0.9"/>
+  <!-- 圆孔打穿 —— 消行的负空间 -->
+  <g clip-path="url(#block-clip4)">
+    <circle cx="38" cy="38" r="10" fill="#FAFAFA"/>
+    <circle cx="62" cy="58" r="7" fill="#FAFAFA"/>
+    <circle cx="52" cy="44" r="4" fill="#FAFAFA" opacity="0.6"/>
+    <circle cx="35" cy="62" r="5" fill="#FAFAFA" opacity="0.8"/>
+  </g>
+</svg>

@@ -1,0 +1,34 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Variant 02: Falling Grid — 点阵方块组，从上到下渐变排列 -->
+  <!-- 设计理念：圆角方块组成的 3×3 网格，逐行下移+透明度递增，模拟下坠过程 -->
+  <defs>
+    <linearGradient id="neon-g2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00F0FF"/>
+      <stop offset="100%" stop-color="#FF00E5"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#neon-g2)">
+    <!-- Row 1: 微弱存在，刚进入画面 -->
+    <rect x="22" y="12" width="12" height="12" rx="3" opacity="0.2"/>
+    <rect x="38" y="12" width="12" height="12" rx="3" opacity="0.15"/>
+    <rect x="54" y="12" width="12" height="12" rx="3" opacity="0.1"/>
+
+    <!-- Row 2: 逐渐清晰 -->
+    <rect x="30" y="30" width="12" height="12" rx="3" opacity="0.5"/>
+    <rect x="46" y="30" width="12" height="12" rx="3" opacity="0.45"/>
+
+    <!-- Row 3: 稳定落位 -->
+    <rect x="22" y="48" width="12" height="12" rx="3" opacity="0.8"/>
+    <rect x="38" y="48" width="12" height="12" rx="3" opacity="0.85"/>
+    <rect x="54" y="48" width="12" height="12" rx="3" opacity="0.75"/>
+
+    <!-- Row 4: 沉底，最实 -->
+    <rect x="30" y="66" width="12" height="12" rx="3" opacity="1"/>
+    <rect x="46" y="66" width="12" height="12" rx="3" opacity="1"/>
+    <rect x="62" y="66" width="12" height="12" rx="3" opacity="0.95"/>
+
+    <!-- 散落方块：脱离网格的碎片，增强动感 -->
+    <rect x="66" y="50" width="8" height="8" rx="2" opacity="0.4" transform="rotate(15, 70, 54)"/>
+    <rect x="18" y="72" width="6" height="6" rx="1.5" opacity="0.3" transform="rotate(-10, 21, 75)"/>
+  </g>
+</svg>

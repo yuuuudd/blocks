@@ -1,0 +1,33 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Variant 03: Rain Lines — 水平线条被圆形裁切，模拟方块下落的"雨" -->
+  <!-- 设计理念：线条系统 + 圆形蒙版，线条疏密变化暗示重力场 -->
+  <defs>
+    <linearGradient id="neon-g3" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00F0FF"/>
+      <stop offset="50%" stop-color="#7B2FFF"/>
+      <stop offset="100%" stop-color="#FF00E5"/>
+    </linearGradient>
+    <clipPath id="circle-clip3">
+      <circle cx="50" cy="50" r="34"/>
+    </clipPath>
+  </defs>
+  <!-- 外圈 -->
+  <circle cx="50" cy="50" r="36" fill="none" stroke="url(#neon-g3)" stroke-width="1.5" opacity="0.4"/>
+  <!-- 线条雨 -->
+  <g clip-path="url(#circle-clip3)" stroke="url(#neon-g3)" stroke-linecap="round">
+    <!-- 上疏下密，暗示重力加速度 -->
+    <line x1="10" y1="24" x2="90" y2="24" stroke-width="1" opacity="0.25"/>
+    <line x1="10" y1="30" x2="90" y2="30" stroke-width="1.2" opacity="0.3"/>
+    <line x1="10" y1="36" x2="90" y2="36" stroke-width="1.5" opacity="0.35"/>
+    <line x1="10" y1="42" x2="90" y2="42" stroke-width="2" opacity="0.5"/>
+    <line x1="10" y1="48" x2="90" y2="48" stroke-width="2.5" opacity="0.65"/>
+    <line x1="10" y1="54" x2="90" y2="54" stroke-width="3" opacity="0.75"/>
+    <line x1="10" y1="60" x2="90" y2="60" stroke-width="2.5" opacity="0.85"/>
+    <line x1="10" y1="66" x2="90" y2="66" stroke-width="2" opacity="0.9"/>
+    <line x1="10" y1="72" x2="90" y2="72" stroke-width="2.5" opacity="1"/>
+    <!-- 偶尔断裂的线 —— 方块之间的间隙 -->
+    <line x1="35" y1="48" x2="65" y2="48" stroke-width="4" opacity="0.15"/>
+  </g>
+  <!-- 重心标记 -->
+  <circle cx="50" cy="56" r="3" fill="url(#neon-g3)"/>
+</svg>
